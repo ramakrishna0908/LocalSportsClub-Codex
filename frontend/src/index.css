@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  background: #121010;
+  color: #c4b5a0;
+  font-family: "Source Sans 3", "Helvetica Neue", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::placeholder {
+  color: #4a4238;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: #6b5530;
+}
+
+button {
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+button:hover {
+  opacity: 0.88;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1614;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3530;
+  border-radius: 3px;
+}
