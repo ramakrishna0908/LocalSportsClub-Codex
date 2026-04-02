@@ -16,6 +16,8 @@ export default function RecordMatch() {
   const [score, setScore] = useState("");
   const [msg, setMsg] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [leagues, setLeagues] = useState([]);
+  const [selectedLeague, setSelectedLeague] = useState("");
 
   useEffect(() => {
     api
@@ -25,6 +27,13 @@ export default function RecordMatch() {
       )
       .catch(console.error);
   }, [player.id]);
+
+  useEffect(() => {
+    api
+      .get("/leagues?status=active")
+      .then((res) => setLeagues(res.data.leagues.filter((l) => l.matchType === type)))
+      .catch(console.error);
+  }, [type]);
 
   const submit = async () => {
     setMsg(null);
@@ -39,6 +48,7 @@ export default function RecordMatch() {
           winners: won ? [player.id] : [parseInt(opponent)],
           losers: won ? [parseInt(opponent)] : [player.id],
           score: score || undefined,
+          leagueId: selectedLeague ? parseInt(selectedLeague) : undefined,
         };
       } else {
         if (!partner || !opp1 || !opp2) throw new Error("Select all players");
@@ -58,6 +68,7 @@ export default function RecordMatch() {
             ? [parseInt(opp1), parseInt(opp2)]
             : [player.id, parseInt(partner)],
           score: score || undefined,
+          leagueId: selectedLeague ? parseInt(selectedLeague) : undefined,
         };
       }
 
@@ -69,6 +80,7 @@ export default function RecordMatch() {
       setOpp1("");
       setOpp2("");
       setScore("");
+      setSelectedLeague("");
       setTimeout(() => setMsg(null), 3000);
     } catch (err) {
       setMsg({
@@ -150,6 +162,27 @@ export default function RecordMatch() {
               />
             </div>
           </>
+        )}
+
+        {/* League selector */}
+        {leagues.length > 0 && (
+          <div className="mb-3.5">
+            <label className="block font-mono text-[10px] text-surface-500 uppercase tracking-widest mb-1.5">
+              League (optional)
+            </label>
+            <select
+              value={selectedLeague}
+              onChange={(e) => setSelectedLeague(e.target.value)}
+              className="w-full bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
+            >
+              <option value="">No league</option>
+              {leagues.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
 
         {/* Result */}

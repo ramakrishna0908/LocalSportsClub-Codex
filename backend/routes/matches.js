@@ -10,7 +10,7 @@ router.post("/", requireAuth, async (req, res) => {
   const client = await db.pool.connect();
 
   try {
-    const { matchType, winners, losers, score } = req.body;
+    const { matchType, winners, losers, score, leagueId } = req.body;
 
     // Validation
     if (!matchType || !["singles", "doubles"].includes(matchType)) {
@@ -41,15 +41,29 @@ router.post("/", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "One or more player IDs are invalid" });
     }
 
+    // Validate league if provided
+    if (leagueId) {
+      const league = await client.query("SELECT * FROM leagues WHERE id = $1", [leagueId]);
+      if (league.rows.length === 0) {
+        return res.status(400).json({ error: "League not found" });
+      }
+      if (league.rows[0].status !== "active") {
+        return res.status(400).json({ error: "League is not active" });
+      }
+      if (league.rows[0].match_type !== matchType) {
+        return res.status(400).json({ error: "Match type does not match league type" });
+      }
+    }
+
     // Begin transaction
     await client.query("BEGIN");
 
     // Insert match
     const matchResult = await client.query(
-      `INSERT INTO matches (match_type, score, recorded_by)
-       VALUES ($1, $2, $3)
+      `INSERT INTO matches (match_type, score, recorded_by, league_id)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [matchType, score || null, req.player.id]
+      [matchType, score || null, req.player.id, leagueId || null]
     );
     const match = matchResult.rows[0];
 

@@ -7,6 +7,11 @@ import Dashboard from "./pages/Dashboard";
 import RecordMatch from "./pages/RecordMatch";
 import Rankings from "./pages/Rankings";
 import MatchHistory from "./pages/MatchHistory";
+import Leagues from "./pages/Leagues";
+import LeagueDetail from "./pages/LeagueDetail";
+import Tournaments from "./pages/Tournaments";
+import TournamentDetail from "./pages/TournamentDetail";
+import CompetitionHistory from "./pages/CompetitionHistory";
 
 function ProtectedRoute({ children }) {
   const { player, loading } = useAuth();
@@ -64,7 +69,11 @@ export default function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/record" element={<RecordMatch />} />
                   <Route path="/rankings" element={<Rankings />} />
-                  <Route path="/history" element={<MatchHistory />} />
+                  <Route path="/leagues" element={<Leagues />} />
+                  <Route path="/leagues/:id" element={<LeagueDetail />} />
+                  <Route path="/tournaments" element={<Tournaments />} />
+                  <Route path="/tournaments/:id" element={<TournamentDetail />} />
+                  <Route path="/history" element={<CompetitionHistory />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </main>
