@@ -5,6 +5,8 @@ const tabs = [
   { to: "/", label: "Dashboard", icon: "📊" },
   { to: "/record", label: "Record", icon: "✏️" },
   { to: "/rankings", label: "Rankings", icon: "🏆" },
+  { to: "/leagues", label: "Leagues", icon: "🏅" },
+  { to: "/tournaments", label: "Tourneys", icon: "🎯" },
   { to: "/history", label: "History", icon: "📋" },
 ];
 

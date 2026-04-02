@@ -6,6 +6,8 @@ const authRoutes = require("./routes/auth");
 const playerRoutes = require("./routes/players");
 const matchRoutes = require("./routes/matches");
 const rankingRoutes = require("./routes/rankings");
+const leagueRoutes = require("./routes/leagues");
+const tournamentRoutes = require("./routes/tournaments");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,6 +30,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/players", playerRoutes);
 app.use("/api/matches", matchRoutes);
 app.use("/api/rankings", rankingRoutes);
+app.use("/api/leagues", leagueRoutes);
+app.use("/api/tournaments", tournamentRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
