@@ -2,7 +2,8 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { processMatchElo } = require("../services/elo");
-const { validateSport } = require("../constants");
+const { processMatchUtr } = require("../services/utr");
+const { validateSport, getRatingSystem } = require("../constants");
 
 const router = express.Router();
 
@@ -94,8 +95,12 @@ router.post("/", requireAuth, async (req, res) => {
       );
     }
 
-    // Process Elo updates
-    await processMatchElo(client, match.id, matchType, winners, losers, sport, ratingType);
+    // Process rating updates (Elo for ping pong, UTR for tennis/pickleball)
+    if (getRatingSystem(sport) === 'utr') {
+      await processMatchUtr(client, match.id, matchType, winners, losers, sport, ratingType);
+    } else {
+      await processMatchElo(client, match.id, matchType, winners, losers, sport, ratingType);
+    }
 
     await client.query("COMMIT");
 

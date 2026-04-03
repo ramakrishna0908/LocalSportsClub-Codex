@@ -1,16 +1,29 @@
 import Badge from "./Badge";
+import { useSport } from "../context/SportContext";
 
 export default function MatchRow({ match, currentPlayerId }) {
+  const { isUtr } = useSport();
   const players = match.players || [];
   const winners = players.filter((p) => p.team === "winner");
   const losers = players.filter((p) => p.team === "loser");
   const myEntry = players.find((p) => p.player_id === currentPlayerId);
   const won = myEntry?.team === "winner";
 
+  // For UTR sports, elo_before/elo_after store UTR * 100
   const eloDiff =
     myEntry?.elo_after != null && myEntry?.elo_before != null
       ? myEntry.elo_after - myEntry.elo_before
       : null;
+
+  const formatDelta = (diff) => {
+    if (diff === null) return null;
+    if (isUtr) {
+      const utrDiff = diff / 100;
+      const sign = utrDiff >= 0 ? "+" : "";
+      return `${sign}${utrDiff.toFixed(2)}`;
+    }
+    return `${diff >= 0 ? "+" : ""}${diff}`;
+  };
 
   const formatDate = (d) =>
     new Date(d).toLocaleDateString("en-US", {
@@ -54,8 +67,7 @@ export default function MatchRow({ match, currentPlayerId }) {
         <span
           className={`font-mono text-[11px] min-w-[36px] text-right ${eloDiff >= 0 ? "text-green-400" : "text-red-400"}`}
         >
-          {eloDiff >= 0 ? "+" : ""}
-          {eloDiff}
+          {formatDelta(eloDiff)}
         </span>
       )}
 

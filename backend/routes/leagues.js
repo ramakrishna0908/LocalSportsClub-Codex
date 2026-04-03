@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireAdminOrDirector } = require("../middleware/auth");
-const { validateSport } = require("../constants");
+const { validateSport, getRatingSystem } = require("../constants");
 
 const router = express.Router();
 
@@ -154,10 +154,14 @@ router.get("/:id", requireAuth, async (req, res) => {
     const row = leagueResult.rows[0];
     const leagueSport = row.sport || "ping_pong";
 
+    const isUtr = getRatingSystem(leagueSport) === "utr";
+
     const playersResult = await db.query(
       `SELECT p.id, p.username, p.display_name, lp.joined_at,
               COALESCE(pr.singles_elo, 1000) AS singles_elo,
-              COALESCE(pr.doubles_elo, 1000) AS doubles_elo
+              COALESCE(pr.doubles_elo, 1000) AS doubles_elo,
+              COALESCE(pr.singles_utr, 5.0) AS singles_utr,
+              COALESCE(pr.doubles_utr, 5.0) AS doubles_utr
        FROM league_players lp
        JOIN players p ON p.id = lp.player_id
        LEFT JOIN player_ratings pr ON pr.player_id = p.id
@@ -191,7 +195,9 @@ router.get("/:id", requireAuth, async (req, res) => {
       const gpResult = await db.query(
         `SELECT lgp.group_id, lgp.position, p.id AS player_id, p.display_name, p.username,
                 COALESCE(pr.singles_elo, 1000) AS singles_elo,
-                COALESCE(pr.doubles_elo, 1000) AS doubles_elo
+                COALESCE(pr.doubles_elo, 1000) AS doubles_elo,
+                COALESCE(pr.singles_utr, 5.0) AS singles_utr,
+                COALESCE(pr.doubles_utr, 5.0) AS doubles_utr
          FROM league_group_players lgp
          JOIN players p ON p.id = lgp.player_id
          LEFT JOIN player_ratings pr ON pr.player_id = p.id
@@ -208,6 +214,8 @@ router.get("/:id", requireAuth, async (req, res) => {
           username: gp.username,
           singlesElo: gp.singles_elo,
           doublesElo: gp.doubles_elo,
+          singlesUtr: parseFloat(gp.singles_utr),
+          doublesUtr: parseFloat(gp.doubles_utr),
           position: gp.position,
         });
       });
@@ -259,12 +267,15 @@ router.get("/:id", requireAuth, async (req, res) => {
       createdBy: row.created_by,
       createdByName: row.created_by_name,
       createdAt: row.created_at,
+      ratingSystem: isUtr ? "utr" : "elo",
       players: playersResult.rows.map((p) => ({
         id: p.id,
         username: p.username,
         displayName: p.display_name,
         singlesElo: p.singles_elo,
         doublesElo: p.doubles_elo,
+        singlesUtr: parseFloat(p.singles_utr),
+        doublesUtr: parseFloat(p.doubles_utr),
         joinedAt: p.joined_at,
       })),
       directors: directorsResult.rows.map((d) => ({
@@ -468,19 +479,23 @@ router.post("/:id/shuffle-groups", requireAuth, async (req, res) => {
 
     const leagueSport = league.rows[0].sport || "ping_pong";
     const matchType = league.rows[0].match_type;
-    const eloField = matchType === "doubles" ? "doubles_elo" : "singles_elo";
+    const isUtr = getRatingSystem(leagueSport) === "utr";
+    const ratingField = isUtr
+      ? (matchType === "doubles" ? "doubles_utr" : "singles_utr")
+      : (matchType === "doubles" ? "doubles_elo" : "singles_elo");
+    const defaultVal = isUtr ? 5.0 : 1000;
     const size = groupSize || 3;
 
     // Get players ordered by their league rating (descending)
     const playersResult = await client.query(
       `SELECT lp.player_id, p.display_name,
-              COALESCE(pr.${eloField}, 1000) AS elo
+              COALESCE(pr.${ratingField}, ${defaultVal}) AS rating
        FROM league_players lp
        JOIN players p ON p.id = lp.player_id
        LEFT JOIN player_ratings pr ON pr.player_id = p.id
          AND pr.sport = $2 AND pr.rating_type = 'league'
        WHERE lp.league_id = $1
-       ORDER BY COALESCE(pr.${eloField}, 1000) DESC`,
+       ORDER BY COALESCE(pr.${ratingField}, ${defaultVal}) DESC`,
       [id, leagueSport]
     );
 
@@ -540,7 +555,7 @@ router.post("/:id/shuffle-groups", requireAuth, async (req, res) => {
         players: g.players.map(p => ({
           id: p.player_id,
           displayName: p.display_name,
-          elo: p.elo,
+          rating: p.rating,
         })),
       })),
     });

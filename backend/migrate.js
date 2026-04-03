@@ -211,6 +211,25 @@ CREATE INDEX IF NOT EXISTS idx_matches_sport         ON matches(sport);
 CREATE INDEX IF NOT EXISTS idx_leagues_sport          ON leagues(sport);
 CREATE INDEX IF NOT EXISTS idx_tournaments_sport      ON tournaments(sport);
 
+-- UTR columns for tennis/pickleball (Universal Tennis Rating, 1.00–16.50 scale)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'player_ratings' AND column_name = 'singles_utr'
+  ) THEN
+    ALTER TABLE player_ratings ADD COLUMN singles_utr NUMERIC(4,2) NOT NULL DEFAULT 5.00;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'player_ratings' AND column_name = 'doubles_utr'
+  ) THEN
+    ALTER TABLE player_ratings ADD COLUMN doubles_utr NUMERIC(4,2) NOT NULL DEFAULT 5.00;
+  END IF;
+END $$;
+
 -- Seed player_ratings for existing players (ping_pong defaults)
 INSERT INTO player_ratings (player_id, sport, rating_type, singles_elo, doubles_elo)
 SELECT id, 'ping_pong', 'skill', singles_elo, doubles_elo FROM players

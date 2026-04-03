@@ -5,9 +5,9 @@ import api from "../api/client";
 const SportContext = createContext(null);
 
 const SPORTS = [
-  { key: "ping_pong", label: "Ping Pong", emoji: "\u{1F3D3}" },
-  { key: "pickleball", label: "Pickleball", emoji: "\u{1F94F}" },
-  { key: "tennis", label: "Tennis", emoji: "\u{1F3BE}" },
+  { key: "ping_pong", label: "Ping Pong", emoji: "\u{1F3D3}", ratingSystem: "elo" },
+  { key: "pickleball", label: "Pickleball", emoji: "\u{1F94F}", ratingSystem: "utr" },
+  { key: "tennis", label: "Tennis", emoji: "\u{1F3BE}", ratingSystem: "utr" },
 ];
 
 const RATING_TYPES = [
@@ -46,6 +46,10 @@ export function SportProvider({ children }) {
         setSport,
         sportLabel: sportConfig.label,
         sportEmoji: sportConfig.emoji,
+        ratingSystem: sportConfig.ratingSystem,
+        isUtr: sportConfig.ratingSystem === "utr",
+        ratingLabel: sportConfig.ratingSystem === "utr" ? "UTR" : "Elo",
+        defaultRating: sportConfig.ratingSystem === "utr" ? 5.0 : 1000,
         SPORTS,
         RATING_TYPES,
       }}

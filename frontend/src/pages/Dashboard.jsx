@@ -24,7 +24,7 @@ const ranges = [
 
 export default function Dashboard() {
   const { player } = useAuth();
-  const { sport, sportLabel } = useSport();
+  const { sport, sportLabel, isUtr, ratingLabel, defaultRating } = useSport();
   const [days, setDays] = useState(7);
   const [matches, setMatches] = useState([]);
   const [ratings, setRatings] = useState({});
@@ -66,6 +66,18 @@ export default function Dashboard() {
   const leagueRating = ratings.league || {};
   const tournamentRating = ratings.tournament || {};
 
+  const formatRating = (singles, doubles) => {
+    if (isUtr) {
+      const s = parseFloat(singles || 5.0).toFixed(2);
+      const d = parseFloat(doubles || 5.0).toFixed(2);
+      return `${s} / ${d}`;
+    }
+    return `${singles || 1000} / ${doubles || 1000}`;
+  };
+
+  const getSingles = (r) => isUtr ? r.singles_utr : r.singles_elo;
+  const getDoubles = (r) => isUtr ? r.doubles_utr : r.doubles_elo;
+
   return (
     <div>
       {/* Header row */}
@@ -90,21 +102,21 @@ export default function Dashboard() {
       {/* Rating cards - 3 types */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
         <StatCard
-          label="Skill Rating"
-          value={`${skillRating.singles_elo || 1000} / ${skillRating.doubles_elo || 1000}`}
-          sub="Singles / Doubles"
+          label={`Skill ${ratingLabel}`}
+          value={formatRating(getSingles(skillRating), getDoubles(skillRating))}
+          sub={`Singles / Doubles${isUtr ? " (UTR 1-16)" : ""}`}
           accentClass="text-brand-300"
         />
         <StatCard
-          label="League Rating"
-          value={`${leagueRating.singles_elo || 1000} / ${leagueRating.doubles_elo || 1000}`}
-          sub="Singles / Doubles"
+          label={`League ${ratingLabel}`}
+          value={formatRating(getSingles(leagueRating), getDoubles(leagueRating))}
+          sub={`Singles / Doubles${isUtr ? " (UTR 1-16)" : ""}`}
           accentClass="text-blue-400"
         />
         <StatCard
-          label="Tournament Rating"
-          value={`${tournamentRating.singles_elo || 1000} / ${tournamentRating.doubles_elo || 1000}`}
-          sub="Singles / Doubles"
+          label={`Tournament ${ratingLabel}`}
+          value={formatRating(getSingles(tournamentRating), getDoubles(tournamentRating))}
+          sub={`Singles / Doubles${isUtr ? " (UTR 1-16)" : ""}`}
           accentClass="text-purple-400"
         />
       </div>

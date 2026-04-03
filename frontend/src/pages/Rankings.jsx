@@ -6,7 +6,7 @@ const medals = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 const medalColors = ["text-brand-300", "text-surface-600", "text-amber-700"];
 
 export default function Rankings() {
-  const { sport, RATING_TYPES } = useSport();
+  const { sport, RATING_TYPES, isUtr, ratingLabel } = useSport();
   const [tab, setTab] = useState("singles");
   const [ratingType, setRatingType] = useState("skill");
   const [rankings, setRankings] = useState([]);
@@ -20,6 +20,11 @@ export default function Rankings() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [tab, sport, ratingType]);
+
+  const formatRating = (val) => {
+    if (isUtr) return parseFloat(val).toFixed(2);
+    return val;
+  };
 
   return (
     <div>
@@ -56,7 +61,7 @@ export default function Rankings() {
       <div className="bg-surface-100/70 border border-surface-200 rounded-xl p-5">
         {/* Header row */}
         <div className="grid grid-cols-[44px_1fr_70px_50px_50px_55px] gap-1.5 px-1.5 pb-3 border-b border-surface-200">
-          {["#", "Player", "Elo", "P", "W", "Win%"].map((h) => (
+          {["#", "Player", ratingLabel, "P", "W", "Win%"].map((h) => (
             <span
               key={h}
               className="font-mono text-[10px] text-surface-400 uppercase tracking-wider"
@@ -101,7 +106,7 @@ export default function Rankings() {
               </div>
 
               <span className="font-mono text-sm text-brand-300 font-bold">
-                {p.elo}
+                {formatRating(p.rating)}
               </span>
               <span className="font-mono text-xs text-surface-500">
                 {p.played}

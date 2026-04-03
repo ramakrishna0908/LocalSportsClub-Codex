@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { validateSport } = require("../constants");
+const { validateSport, getRatingSystem } = require("../constants");
 
 const router = express.Router();
 
@@ -14,14 +14,16 @@ router.get("/", requireAuth, async (req, res) => {
     const result = await db.query(
       `SELECT p.id, p.username, p.display_name, p.role, p.default_sport, p.created_at,
               COALESCE(pr.singles_elo, 1000) AS singles_elo,
-              COALESCE(pr.doubles_elo, 1000) AS doubles_elo
+              COALESCE(pr.doubles_elo, 1000) AS doubles_elo,
+              COALESCE(pr.singles_utr, 5.0) AS singles_utr,
+              COALESCE(pr.doubles_utr, 5.0) AS doubles_utr
        FROM players p
        LEFT JOIN player_ratings pr ON pr.player_id = p.id
          AND pr.sport = $1 AND pr.rating_type = 'skill'
        ORDER BY p.display_name ASC`,
       [sportVal]
     );
-    res.json({ players: result.rows });
+    res.json({ players: result.rows, ratingSystem: getRatingSystem(sportVal) });
   } catch (err) {
     console.error("List players error:", err);
     res.status(500).json({ error: "Failed to fetch players" });
@@ -44,9 +46,9 @@ router.get("/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Player not found" });
     }
 
-    // Get all ratings for this player
+    // Get all ratings for this player (include UTR columns)
     const ratingsResult = await db.query(
-      `SELECT sport, rating_type, singles_elo, doubles_elo
+      `SELECT sport, rating_type, singles_elo, doubles_elo, singles_utr, doubles_utr
        FROM player_ratings WHERE player_id = $1
        ORDER BY sport, rating_type`,
       [id]
