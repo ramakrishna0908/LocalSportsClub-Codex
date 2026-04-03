@@ -41,7 +41,7 @@ async function requireAuth(req, res, next) {
 
     // Attach player to request
     const player = await db.query(
-      "SELECT id, username, display_name, email, singles_elo, doubles_elo, created_at FROM players WHERE id = $1",
+      "SELECT id, username, display_name, email, singles_elo, doubles_elo, default_sport, role, created_at FROM players WHERE id = $1",
       [decoded.id]
     );
     if (player.rows.length === 0) {
@@ -57,4 +57,20 @@ async function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { generateToken, getExpiryDate, requireAuth, JWT_SECRET };
+// Middleware: require admin role
+function requireAdmin(req, res, next) {
+  if (req.player.role !== 'admin') {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+
+// Middleware: require admin or director role
+function requireAdminOrDirector(req, res, next) {
+  if (req.player.role !== 'admin' && req.player.role !== 'director') {
+    return res.status(403).json({ error: "Admin or director access required" });
+  }
+  next();
+}
+
+module.exports = { generateToken, getExpiryDate, requireAuth, requireAdmin, requireAdminOrDirector, JWT_SECRET };

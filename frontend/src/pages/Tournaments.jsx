@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { useSport } from "../context/SportContext";
 import api from "../api/client";
 import CompetitionCard from "../components/CompetitionCard";
 
@@ -13,6 +15,8 @@ const statusLabels = {
 };
 
 export default function Tournaments() {
+  const { player } = useAuth();
+  const { sport } = useSport();
   const navigate = useNavigate();
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,9 +27,10 @@ export default function Tournaments() {
 
   const fetchTournaments = () => {
     setLoading(true);
-    const params = filter !== "all" ? `?status=${filter}` : "";
+    const params = { sport };
+    if (filter !== "all") params.status = filter;
     api
-      .get(`/tournaments${params}`)
+      .get("/tournaments", { params })
       .then((res) => setTournaments(res.data.tournaments))
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -33,7 +38,7 @@ export default function Tournaments() {
 
   useEffect(() => {
     fetchTournaments();
-  }, [filter]);
+  }, [filter, sport]);
 
   const createTournament = async () => {
     setMsg(null);
@@ -43,6 +48,7 @@ export default function Tournaments() {
       }
       await api.post("/tournaments", {
         ...form,
+        sport,
         maxPlayers: form.maxPlayers ? parseInt(form.maxPlayers) : undefined,
       });
       setShowCreate(false);
@@ -60,12 +66,14 @@ export default function Tournaments() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="font-display text-2xl text-surface-900">Tournaments</h2>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-brand-700 to-brand-600 border border-brand-500 font-display font-bold text-xs text-surface-900"
-        >
-          {showCreate ? "Cancel" : "+ New Tournament"}
-        </button>
+        {(player?.role === "admin" || player?.role === "director") && (
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-brand-700 to-brand-600 border border-brand-500 font-display font-bold text-xs text-surface-900"
+          >
+            {showCreate ? "Cancel" : "+ New Tournament"}
+          </button>
+        )}
       </div>
 
       {/* Create form */}

@@ -1,15 +1,18 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const db = require("../db");
-const { generateToken, getExpiryDate, requireAuth } = require("../middleware/auth");
+const { generateToken, getExpiryDate, requireAuth, requireAdmin } = require("../middleware/auth");
+const { VALID_SPORTS, VALID_RATING_TYPES, validateSport } = require("../constants");
+const { ensurePlayerRatings } = require("../services/elo");
 
 const router = express.Router();
 const SALT_ROUNDS = 12;
 
 // POST /api/auth/register
 router.post("/register", async (req, res) => {
+  const client = await db.pool.connect();
   try {
-    const { username, displayName, password, email } = req.body;
+    const { username, displayName, password, email, defaultSport } = req.body;
 
     // Validation
     if (!username || username.length < 3) {
@@ -22,8 +25,10 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Display name is required" });
     }
 
+    const sport = defaultSport && validateSport(defaultSport) ? defaultSport : 'ping_pong';
+
     // Check existing username
-    const existing = await db.query(
+    const existing = await client.query(
       "SELECT id FROM players WHERE username = $1",
       [username.toLowerCase()]
     );
@@ -33,7 +38,7 @@ router.post("/register", async (req, res) => {
 
     // Check existing email
     if (email) {
-      const emailExists = await db.query(
+      const emailExists = await client.query(
         "SELECT id FROM players WHERE email = $1",
         [email.toLowerCase()]
       );
@@ -42,28 +47,40 @@ router.post("/register", async (req, res) => {
       }
     }
 
+    await client.query("BEGIN");
+
     // Hash password and create player
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const result = await db.query(
-      `INSERT INTO players (username, display_name, email, password_hash, last_login)
-       VALUES ($1, $2, $3, $4, NOW())
-       RETURNING id, username, display_name, email, singles_elo, doubles_elo, created_at`,
-      [username.toLowerCase(), displayName.trim(), email ? email.toLowerCase() : null, passwordHash]
+    const result = await client.query(
+      `INSERT INTO players (username, display_name, email, password_hash, default_sport, last_login)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       RETURNING id, username, display_name, email, default_sport, created_at`,
+      [username.toLowerCase(), displayName.trim(), email ? email.toLowerCase() : null, passwordHash, sport]
     );
 
     const player = result.rows[0];
 
+    // Seed player_ratings for all sports and rating types
+    for (const s of VALID_SPORTS) {
+      await ensurePlayerRatings(client, [player.id], s);
+    }
+
     // Create session
     const token = generateToken(player.id);
-    await db.query(
+    await client.query(
       "INSERT INTO sessions (player_id, token, expires_at) VALUES ($1, $2, $3)",
       [player.id, token, getExpiryDate()]
     );
 
+    await client.query("COMMIT");
+
     res.status(201).json({ player, token });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Register error:", err);
     res.status(500).json({ error: "Registration failed" });
+  } finally {
+    client.release();
   }
 });
 
@@ -123,6 +140,64 @@ router.post("/logout", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Logout error:", err);
     res.status(500).json({ error: "Logout failed" });
+  }
+});
+
+// POST /api/auth/change-password
+router.post("/change-password", requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current password and new password are required" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    }
+
+    const result = await db.query(
+      "SELECT password_hash FROM players WHERE id = $1",
+      [req.player.id]
+    );
+    const valid = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await db.query("UPDATE players SET password_hash = $1 WHERE id = $2", [newHash, req.player.id]);
+
+    res.json({ message: "Password changed successfully" });
+  } catch (err) {
+    console.error("Change password error:", err);
+    res.status(500).json({ error: "Failed to change password" });
+  }
+});
+
+// PATCH /api/auth/role — admin only: assign role to a user
+router.patch("/role", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { playerId, role } = req.body;
+
+    if (!playerId || !role) {
+      return res.status(400).json({ error: "playerId and role are required" });
+    }
+    if (!['admin', 'director', 'user'].includes(role)) {
+      return res.status(400).json({ error: "role must be 'admin', 'director', or 'user'" });
+    }
+
+    const result = await db.query(
+      "UPDATE players SET role = $1 WHERE id = $2 RETURNING id, username, display_name, role",
+      [role, playerId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Player not found" });
+    }
+
+    res.json({ player: result.rows[0] });
+  } catch (err) {
+    console.error("Assign role error:", err);
+    res.status(500).json({ error: "Failed to assign role" });
   }
 });
 

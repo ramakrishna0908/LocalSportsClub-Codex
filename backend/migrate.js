@@ -149,6 +149,158 @@ CREATE INDEX IF NOT EXISTS idx_league_players_league          ON league_players(
 CREATE INDEX IF NOT EXISTS idx_league_players_player          ON league_players(player_id);
 CREATE INDEX IF NOT EXISTS idx_tournament_players_tournament   ON tournament_players(tournament_id);
 CREATE INDEX IF NOT EXISTS idx_tournament_brackets_tournament  ON tournament_brackets(tournament_id);
+
+-- ============================================================
+-- Multi-sport support
+-- ============================================================
+
+-- Add default_sport to players
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'players' AND column_name = 'default_sport'
+  ) THEN
+    ALTER TABLE players ADD COLUMN default_sport VARCHAR(20) NOT NULL DEFAULT 'ping_pong';
+  END IF;
+END $$;
+
+-- Add sport to matches
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'matches' AND column_name = 'sport'
+  ) THEN
+    ALTER TABLE matches ADD COLUMN sport VARCHAR(20) NOT NULL DEFAULT 'ping_pong';
+  END IF;
+END $$;
+
+-- Add sport to leagues
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'leagues' AND column_name = 'sport'
+  ) THEN
+    ALTER TABLE leagues ADD COLUMN sport VARCHAR(20) NOT NULL DEFAULT 'ping_pong';
+  END IF;
+END $$;
+
+-- Add sport to tournaments
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tournaments' AND column_name = 'sport'
+  ) THEN
+    ALTER TABLE tournaments ADD COLUMN sport VARCHAR(20) NOT NULL DEFAULT 'ping_pong';
+  END IF;
+END $$;
+
+-- Player ratings table: per-sport, per-rating-type Elo
+CREATE TABLE IF NOT EXISTS player_ratings (
+  id           SERIAL PRIMARY KEY,
+  player_id    INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  sport        VARCHAR(20) NOT NULL,
+  rating_type  VARCHAR(20) NOT NULL,
+  singles_elo  INTEGER NOT NULL DEFAULT 1000,
+  doubles_elo  INTEGER NOT NULL DEFAULT 1000,
+  UNIQUE(player_id, sport, rating_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_player_ratings_player ON player_ratings(player_id);
+CREATE INDEX IF NOT EXISTS idx_player_ratings_sport  ON player_ratings(player_id, sport);
+CREATE INDEX IF NOT EXISTS idx_matches_sport         ON matches(sport);
+CREATE INDEX IF NOT EXISTS idx_leagues_sport          ON leagues(sport);
+CREATE INDEX IF NOT EXISTS idx_tournaments_sport      ON tournaments(sport);
+
+-- Seed player_ratings for existing players (ping_pong defaults)
+INSERT INTO player_ratings (player_id, sport, rating_type, singles_elo, doubles_elo)
+SELECT id, 'ping_pong', 'skill', singles_elo, doubles_elo FROM players
+ON CONFLICT (player_id, sport, rating_type) DO NOTHING;
+
+INSERT INTO player_ratings (player_id, sport, rating_type, singles_elo, doubles_elo)
+SELECT id, 'ping_pong', 'league', 1000, 1000 FROM players
+ON CONFLICT (player_id, sport, rating_type) DO NOTHING;
+
+INSERT INTO player_ratings (player_id, sport, rating_type, singles_elo, doubles_elo)
+SELECT id, 'ping_pong', 'tournament', 1000, 1000 FROM players
+ON CONFLICT (player_id, sport, rating_type) DO NOTHING;
+
+-- ============================================================
+-- Roles & Directors
+-- ============================================================
+
+-- Add role to players
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'players' AND column_name = 'role'
+  ) THEN
+    ALTER TABLE players ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user';
+  END IF;
+END $$;
+
+-- League directors (multiple directors per league)
+CREATE TABLE IF NOT EXISTS league_directors (
+  id         SERIAL PRIMARY KEY,
+  league_id  INTEGER NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id  INTEGER NOT NULL REFERENCES players(id),
+  UNIQUE(league_id, player_id)
+);
+
+-- Tournament directors (multiple directors per tournament)
+CREATE TABLE IF NOT EXISTS tournament_directors (
+  id            SERIAL PRIMARY KEY,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  player_id     INTEGER NOT NULL REFERENCES players(id),
+  UNIQUE(tournament_id, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_league_directors_league ON league_directors(league_id);
+CREATE INDEX IF NOT EXISTS idx_tournament_directors_tournament ON tournament_directors(tournament_id);
+
+-- ============================================================
+-- League Groups (for group shuffle)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS league_groups (
+  id         SERIAL PRIMARY KEY,
+  league_id  INTEGER NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  name       VARCHAR(100) NOT NULL,
+  position   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS league_group_players (
+  id         SERIAL PRIMARY KEY,
+  group_id   INTEGER NOT NULL REFERENCES league_groups(id) ON DELETE CASCADE,
+  player_id  INTEGER NOT NULL REFERENCES players(id),
+  position   INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(group_id, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_league_groups_league ON league_groups(league_id);
+CREATE INDEX IF NOT EXISTS idx_league_group_players_group ON league_group_players(group_id);
+
+-- ============================================================
+-- Club Settings (admin-configurable key/value)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS club_settings (
+  key    VARCHAR(100) PRIMARY KEY,
+  value  TEXT NOT NULL
+);
+
+-- Default: allow both group modes
+INSERT INTO club_settings (key, value) VALUES ('group_shuffle_mode', 'both')
+ON CONFLICT (key) DO NOTHING;
+
+-- Backfill: make league creators directors
+INSERT INTO league_directors (league_id, player_id)
+SELECT id, created_by FROM leagues
+ON CONFLICT (league_id, player_id) DO NOTHING;
+
+-- Backfill: make tournament creators directors
+INSERT INTO tournament_directors (tournament_id, player_id)
+SELECT id, created_by FROM tournaments
+ON CONFLICT (tournament_id, player_id) DO NOTHING;
 `;
 
 async function migrate() {

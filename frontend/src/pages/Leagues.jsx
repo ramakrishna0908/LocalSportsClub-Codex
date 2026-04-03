@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useSport } from "../context/SportContext";
 import api from "../api/client";
 import CompetitionCard from "../components/CompetitionCard";
 
@@ -8,6 +9,7 @@ const statusFilters = ["all", "active", "upcoming", "completed"];
 
 export default function Leagues() {
   const { player } = useAuth();
+  const { sport } = useSport();
   const navigate = useNavigate();
   const [leagues, setLeagues] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,9 +20,10 @@ export default function Leagues() {
 
   const fetchLeagues = () => {
     setLoading(true);
-    const params = filter !== "all" ? `?status=${filter}` : "";
+    const params = { sport };
+    if (filter !== "all") params.status = filter;
     api
-      .get(`/leagues${params}`)
+      .get("/leagues", { params })
       .then((res) => setLeagues(res.data.leagues))
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -28,7 +31,7 @@ export default function Leagues() {
 
   useEffect(() => {
     fetchLeagues();
-  }, [filter]);
+  }, [filter, sport]);
 
   const createLeague = async () => {
     setMsg(null);
@@ -36,7 +39,7 @@ export default function Leagues() {
       if (!form.name || !form.startDate || !form.endDate) {
         throw new Error("Name, start date, and end date are required");
       }
-      await api.post("/leagues", form);
+      await api.post("/leagues", { ...form, sport });
       setShowCreate(false);
       setForm({ name: "", description: "", matchType: "singles", startDate: "", endDate: "" });
       fetchLeagues();
@@ -52,12 +55,14 @@ export default function Leagues() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="font-display text-2xl text-surface-900">Leagues</h2>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-brand-700 to-brand-600 border border-brand-500 font-display font-bold text-xs text-surface-900"
-        >
-          {showCreate ? "Cancel" : "+ New League"}
-        </button>
+        {(player?.role === "admin" || player?.role === "director") && (
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-brand-700 to-brand-600 border border-brand-500 font-display font-bold text-xs text-surface-900"
+          >
+            {showCreate ? "Cancel" : "+ New League"}
+          </button>
+        )}
       </div>
 
       {/* Create form */}
