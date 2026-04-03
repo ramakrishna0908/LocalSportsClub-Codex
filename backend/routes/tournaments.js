@@ -1,15 +1,33 @@
 const express = require("express");
 const db = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, requireAdminOrDirector } = require("../middleware/auth");
 const { processMatchElo } = require("../services/elo");
 const { generateBracket, advanceWinner, nextPowerOf2 } = require("../services/bracket");
+const { validateSport } = require("../constants");
 
 const router = express.Router();
 
-// POST /api/tournaments — create a new tournament
-router.post("/", requireAuth, async (req, res) => {
+// Helper: check if player is a director of a tournament
+async function isTournamentDirector(tournamentId, playerId, client) {
+  const conn = client || db;
+  const result = await conn.query(
+    "SELECT id FROM tournament_directors WHERE tournament_id = $1 AND player_id = $2",
+    [tournamentId, playerId]
+  );
+  return result.rows.length > 0;
+}
+
+// Helper: check if player can manage a tournament (admin or tournament director)
+async function canManageTournament(tournamentId, player, client) {
+  if (player.role === 'admin') return true;
+  return isTournamentDirector(tournamentId, player.id, client);
+}
+
+// POST /api/tournaments — create a new tournament (admin or director only)
+router.post("/", requireAuth, requireAdminOrDirector, async (req, res) => {
+  const client = await db.pool.connect();
   try {
-    const { name, description, matchType, tournamentDate, maxPlayers } = req.body;
+    const { name, description, matchType, tournamentDate, maxPlayers, sport } = req.body;
 
     if (!name || !matchType || !tournamentDate) {
       return res.status(400).json({ error: "name, matchType, and tournamentDate are required" });
@@ -17,25 +35,43 @@ router.post("/", requireAuth, async (req, res) => {
     if (!["singles", "doubles"].includes(matchType)) {
       return res.status(400).json({ error: "matchType must be 'singles' or 'doubles'" });
     }
+    if (!sport || !validateSport(sport)) {
+      return res.status(400).json({ error: "sport must be 'ping_pong', 'pickleball', or 'tennis'" });
+    }
 
-    const result = await db.query(
-      `INSERT INTO tournaments (name, description, match_type, tournament_date, max_players, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `INSERT INTO tournaments (name, description, match_type, tournament_date, max_players, created_by, sport)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [name, description || null, matchType, tournamentDate, maxPlayers || null, req.player.id]
+      [name, description || null, matchType, tournamentDate, maxPlayers || null, req.player.id, sport]
+    );
+    const tournament = result.rows[0];
+
+    // Creator becomes a director
+    await client.query(
+      `INSERT INTO tournament_directors (tournament_id, player_id) VALUES ($1, $2)
+       ON CONFLICT (tournament_id, player_id) DO NOTHING`,
+      [tournament.id, req.player.id]
     );
 
-    res.status(201).json({ tournament: result.rows[0] });
+    await client.query("COMMIT");
+
+    res.status(201).json({ tournament });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Create tournament error:", err);
     res.status(500).json({ error: "Failed to create tournament" });
+  } finally {
+    client.release();
   }
 });
 
 // GET /api/tournaments — list tournaments
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const { status, matchType } = req.query;
+    const { status, matchType, sport } = req.query;
     const conditions = [];
     const params = [];
 
@@ -46,6 +82,10 @@ router.get("/", requireAuth, async (req, res) => {
     if (matchType && ["singles", "doubles"].includes(matchType)) {
       params.push(matchType);
       conditions.push(`t.match_type = $${params.length}`);
+    }
+    if (sport && validateSport(sport)) {
+      params.push(sport);
+      conditions.push(`t.sport = $${params.length}`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -73,6 +113,7 @@ router.get("/", requireAuth, async (req, res) => {
       name: row.name,
       description: row.description,
       matchType: row.match_type,
+      sport: row.sport,
       status: row.status,
       tournamentDate: row.tournament_date,
       maxPlayers: row.max_players,
@@ -105,15 +146,29 @@ router.get("/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Tournament not found" });
     }
     const row = tourneyResult.rows[0];
+    const tourneySport = row.sport || "ping_pong";
 
-    // Registered players
+    // Registered players with tournament ratings
     const playersResult = await db.query(
-      `SELECT p.id, p.username, p.display_name, p.singles_elo, p.doubles_elo,
+      `SELECT p.id, p.username, p.display_name,
+              COALESCE(pr.singles_elo, 1000) AS singles_elo,
+              COALESCE(pr.doubles_elo, 1000) AS doubles_elo,
               tp.seed, tp.registered_at
        FROM tournament_players tp
        JOIN players p ON p.id = tp.player_id
+       LEFT JOIN player_ratings pr ON pr.player_id = p.id
+         AND pr.sport = $2 AND pr.rating_type = 'tournament'
        WHERE tp.tournament_id = $1
        ORDER BY tp.seed NULLS LAST, tp.registered_at`,
+      [id, tourneySport]
+    );
+
+    // Directors
+    const directorsResult = await db.query(
+      `SELECT p.id, p.username, p.display_name
+       FROM tournament_directors td
+       JOIN players p ON p.id = td.player_id
+       WHERE td.tournament_id = $1`,
       [id]
     );
 
@@ -133,13 +188,15 @@ router.get("/:id", requireAuth, async (req, res) => {
     );
 
     const isRegistered = playersResult.rows.some((p) => p.id === req.player.id);
-    const isCreator = row.created_by === req.player.id;
+    const isDirector = await isTournamentDirector(id, req.player.id);
+    const canManage = req.player.role === 'admin' || isDirector;
 
     const tournament = {
       id: row.id,
       name: row.name,
       description: row.description,
       matchType: row.match_type,
+      sport: row.sport,
       status: row.status,
       tournamentDate: row.tournament_date,
       maxPlayers: row.max_players,
@@ -147,7 +204,9 @@ router.get("/:id", requireAuth, async (req, res) => {
       createdByName: row.created_by_name,
       createdAt: row.created_at,
       isRegistered,
-      isCreator,
+      isCreator: row.created_by === req.player.id,
+      isDirector,
+      canManage,
       players: playersResult.rows.map((p) => ({
         id: p.id,
         username: p.username,
@@ -156,6 +215,11 @@ router.get("/:id", requireAuth, async (req, res) => {
         doublesElo: p.doubles_elo,
         seed: p.seed,
         registeredAt: p.registered_at,
+      })),
+      directors: directorsResult.rows.map((d) => ({
+        id: d.id,
+        username: d.username,
+        displayName: d.display_name,
       })),
       bracket: bracketResult.rows.map((b) => ({
         id: b.id,
@@ -239,7 +303,7 @@ router.post("/:id/unregister", requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/tournaments/:id/generate-bracket — creator only
+// POST /api/tournaments/:id/generate-bracket — director or admin
 router.post("/:id/generate-bracket", requireAuth, async (req, res) => {
   const client = await db.pool.connect();
   try {
@@ -249,8 +313,8 @@ router.post("/:id/generate-bracket", requireAuth, async (req, res) => {
     if (tourney.rows.length === 0) {
       return res.status(404).json({ error: "Tournament not found" });
     }
-    if (tourney.rows[0].created_by !== req.player.id) {
-      return res.status(403).json({ error: "Only the tournament creator can generate the bracket" });
+    if (!(await canManageTournament(id, req.player, client))) {
+      return res.status(403).json({ error: "Only tournament directors or admins can generate the bracket" });
     }
     if (tourney.rows[0].status !== "registration") {
       return res.status(400).json({ error: "Bracket can only be generated during registration phase" });
@@ -290,6 +354,7 @@ router.post("/:id/record-match", requireAuth, async (req, res) => {
     }
 
     const matchType = tourney.rows[0].match_type;
+    const tourneySport = tourney.rows[0].sport || "ping_pong";
 
     // Fetch the bracket slot
     const slotResult = await client.query(
@@ -316,15 +381,14 @@ router.post("/:id/record-match", requireAuth, async (req, res) => {
 
     await client.query("BEGIN");
 
-    // Record the actual match (same pattern as matches route)
     const winners = [winnerId];
     const losers = [loserId];
 
     const matchResult = await client.query(
-      `INSERT INTO matches (match_type, score, recorded_by, tournament_id)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO matches (match_type, score, recorded_by, tournament_id, sport)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [matchType, score || null, req.player.id, id]
+      [matchType, score || null, req.player.id, id, tourneySport]
     );
     const match = matchResult.rows[0];
 
@@ -337,17 +401,14 @@ router.post("/:id/record-match", requireAuth, async (req, res) => {
       [match.id, loserId]
     );
 
-    // Process Elo
-    await processMatchElo(client, match.id, matchType, winners, losers);
+    await processMatchElo(client, match.id, matchType, winners, losers, tourneySport, "tournament");
 
-    // Update bracket slot
     await client.query(
       `UPDATE tournament_brackets SET winner_id = $1, match_id = $2
        WHERE tournament_id = $3 AND round = $4 AND position = $5`,
       [winnerId, match.id, id, round, position]
     );
 
-    // Calculate total rounds
     const playerCount = await client.query(
       "SELECT COUNT(*) FROM tournament_players WHERE tournament_id = $1",
       [id]
@@ -355,7 +416,6 @@ router.post("/:id/record-match", requireAuth, async (req, res) => {
     const bracketSize = nextPowerOf2(parseInt(playerCount.rows[0].count));
     const totalRounds = Math.log2(bracketSize);
 
-    // Advance winner
     await advanceWinner(client, parseInt(id), round, position, winnerId, totalRounds);
 
     await client.query("COMMIT");
@@ -370,7 +430,7 @@ router.post("/:id/record-match", requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/tournaments/:id/status — update status (creator only)
+// PATCH /api/tournaments/:id/status — update status (director or admin)
 router.patch("/:id/status", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -380,8 +440,8 @@ router.patch("/:id/status", requireAuth, async (req, res) => {
     if (tourney.rows.length === 0) {
       return res.status(404).json({ error: "Tournament not found" });
     }
-    if (tourney.rows[0].created_by !== req.player.id) {
-      return res.status(403).json({ error: "Only the tournament creator can update status" });
+    if (!(await canManageTournament(id, req.player))) {
+      return res.status(403).json({ error: "Only tournament directors or admins can update status" });
     }
 
     const validTransitions = {
@@ -402,6 +462,45 @@ router.patch("/:id/status", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Update tournament status error:", err);
     res.status(500).json({ error: "Failed to update tournament status" });
+  }
+});
+
+// POST /api/tournaments/:id/directors — add a director
+router.post("/:id/directors", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { playerId } = req.body;
+
+    if (!playerId) {
+      return res.status(400).json({ error: "playerId is required" });
+    }
+
+    const tourney = await db.query("SELECT * FROM tournaments WHERE id = $1", [id]);
+    if (tourney.rows.length === 0) {
+      return res.status(404).json({ error: "Tournament not found" });
+    }
+    if (!(await canManageTournament(id, req.player))) {
+      return res.status(403).json({ error: "Only tournament directors or admins can add directors" });
+    }
+
+    const target = await db.query("SELECT role FROM players WHERE id = $1", [playerId]);
+    if (target.rows.length === 0) {
+      return res.status(404).json({ error: "Player not found" });
+    }
+    if (!['admin', 'director'].includes(target.rows[0].role)) {
+      return res.status(400).json({ error: "Player must have director or admin role" });
+    }
+
+    await db.query(
+      `INSERT INTO tournament_directors (tournament_id, player_id) VALUES ($1, $2)
+       ON CONFLICT (tournament_id, player_id) DO NOTHING`,
+      [id, playerId]
+    );
+
+    res.json({ message: "Director added" });
+  } catch (err) {
+    console.error("Add tournament director error:", err);
+    res.status(500).json({ error: "Failed to add director" });
   }
 });
 

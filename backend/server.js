@@ -8,13 +8,17 @@ const matchRoutes = require("./routes/matches");
 const rankingRoutes = require("./routes/rankings");
 const leagueRoutes = require("./routes/leagues");
 const tournamentRoutes = require("./routes/tournaments");
+const settingsRoutes = require("./routes/settings");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  origin: (origin, callback) => {
+    // Allow requests from any local origin in dev
+    callback(null, true);
+  },
   credentials: true,
 }));
 app.use(express.json());
@@ -32,6 +36,7 @@ app.use("/api/matches", matchRoutes);
 app.use("/api/rankings", rankingRoutes);
 app.use("/api/leagues", leagueRoutes);
 app.use("/api/tournaments", tournamentRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -50,5 +55,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n🏓 Ping Pong Club API running on http://localhost:${PORT}\n`);
+  console.log(`\n🏅 Local Sports Club API running on http://localhost:${PORT}\n`);
 });

@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useSport } from "../context/SportContext";
 import api from "../api/client";
 
 export default function RecordMatch() {
   const { player, refreshPlayer } = useAuth();
+  const { sport, sportEmoji } = useSport();
   const navigate = useNavigate();
   const [type, setType] = useState("singles");
   const [players, setPlayers] = useState([]);
@@ -21,19 +23,20 @@ export default function RecordMatch() {
 
   useEffect(() => {
     api
-      .get("/players")
+      .get("/players", { params: { sport } })
       .then((res) =>
         setPlayers(res.data.players.filter((p) => p.id !== player.id))
       )
       .catch(console.error);
-  }, [player.id]);
+  }, [player.id, sport]);
 
   useEffect(() => {
     api
-      .get("/leagues?status=active")
+      .get("/leagues", { params: { status: "active", sport } })
       .then((res) => setLeagues(res.data.leagues.filter((l) => l.matchType === type)))
       .catch(console.error);
-  }, [type]);
+    setSelectedLeague("");
+  }, [type, sport]);
 
   const submit = async () => {
     setMsg(null);
@@ -45,6 +48,7 @@ export default function RecordMatch() {
         if (!opponent) throw new Error("Select an opponent");
         body = {
           matchType: "singles",
+          sport,
           winners: won ? [player.id] : [parseInt(opponent)],
           losers: won ? [parseInt(opponent)] : [player.id],
           score: score || undefined,
@@ -61,6 +65,7 @@ export default function RecordMatch() {
         if (ids.size !== 4) throw new Error("All 4 players must be different");
         body = {
           matchType: "doubles",
+          sport,
           winners: won
             ? [player.id, parseInt(partner)]
             : [parseInt(opp1), parseInt(opp2)],
@@ -128,7 +133,7 @@ export default function RecordMatch() {
               className={`flex-1 rounded-lg py-2.5 px-4 font-body text-sm border transition-all
                 ${type === t ? "bg-surface-200 border-surface-300 text-surface-800" : "bg-surface-50/50 border-surface-200 text-surface-500"}`}
             >
-              {t === "singles" ? "🏓 Singles" : "👥 Doubles"}
+              {t === "singles" ? `${sportEmoji} Singles` : "\u{1F465} Doubles"}
             </button>
           ))}
         </div>
@@ -196,14 +201,14 @@ export default function RecordMatch() {
               className={`flex-1 rounded-lg py-2.5 px-4 font-body text-sm border transition-all
                 ${won ? "bg-green-950 border-green-800 text-green-400" : "bg-surface-50/50 border-surface-200 text-surface-500"}`}
             >
-              🎉 Won
+              {"\u{1F389}"} Won
             </button>
             <button
               onClick={() => setWon(false)}
               className={`flex-1 rounded-lg py-2.5 px-4 font-body text-sm border transition-all
                 ${!won ? "bg-red-950 border-red-800 text-red-400" : "bg-surface-50/50 border-surface-200 text-surface-500"}`}
             >
-              😤 Lost
+              {"\u{1F624}"} Lost
             </button>
           </div>
         </div>

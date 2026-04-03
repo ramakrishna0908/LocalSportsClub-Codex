@@ -28,9 +28,9 @@ export default function Login() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-10">
-          <div className="text-5xl mb-1">🏓</div>
+          <div className="text-5xl mb-1">{"\u{1F3C5}"}</div>
           <h1 className="font-display text-3xl text-surface-900 tracking-tight">
-            Ping Pong Club
+            Local Sports Club
           </h1>
           <p className="font-body text-sm text-surface-500 mt-2">
             Track your games. Climb the ranks.

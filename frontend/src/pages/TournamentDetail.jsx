@@ -5,6 +5,15 @@ import api from "../api/client";
 import Badge from "../components/Badge";
 import BracketView from "../components/BracketView";
 
+function formatName(displayName) {
+  if (!displayName) return "";
+  const parts = displayName.trim().split(/\s+/);
+  if (parts.length < 2) return displayName;
+  const last = parts[parts.length - 1];
+  const first = parts.slice(0, -1).join(" ");
+  return `${last}, ${first}`;
+}
+
 const statusColors = {
   upcoming: "slate",
   registration: "blue",
@@ -28,6 +37,8 @@ export default function TournamentDetail() {
   const [recordingMatch, setRecordingMatch] = useState(null);
   const [selectedWinner, setSelectedWinner] = useState("");
   const [matchScore, setMatchScore] = useState("");
+  const [allPlayers, setAllPlayers] = useState([]);
+  const [directorToAdd, setDirectorToAdd] = useState("");
 
   const fetchTournament = () => {
     setLoading(true);
@@ -41,6 +52,24 @@ export default function TournamentDetail() {
   useEffect(() => {
     fetchTournament();
   }, [id]);
+
+  useEffect(() => {
+    if (player?.role === "admin" || player?.role === "director") {
+      api.get("/players").then((res) => setAllPlayers(res.data.players)).catch(() => {});
+    }
+  }, [player?.role]);
+
+  const handleAddDirector = async () => {
+    if (!directorToAdd) return;
+    setActionMsg(null);
+    try {
+      await api.post(`/tournaments/${id}/directors`, { playerId: parseInt(directorToAdd) });
+      setDirectorToAdd("");
+      fetchTournament();
+    } catch (err) {
+      setActionMsg(err.response?.data?.error || "Failed to add director");
+    }
+  };
 
   const handleRegister = async () => {
     try {
@@ -107,12 +136,11 @@ export default function TournamentDetail() {
     return <p className="text-center text-surface-400 font-body text-sm py-8">Tournament not found</p>;
   }
 
-  const isCreator = tournament.isCreator;
+  const canManage = tournament.canManage;
   const pendingMatches = tournament.bracket.filter(
     (s) => s.player1Id && s.player2Id && !s.winnerId
   );
 
-  // Find the champion if completed
   const finalMatch = tournament.bracket.length > 0
     ? tournament.bracket.reduce((a, b) => (a.round > b.round ? a : b))
     : null;
@@ -144,17 +172,33 @@ export default function TournamentDetail() {
             </span>
           )}
           <span className="font-mono text-[11px] text-surface-400">
-            Created by {tournament.createdByName}
+            Created by {formatName(tournament.createdByName)}
           </span>
         </div>
+        {/* Directors */}
+        {tournament.directors && tournament.directors.length > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="font-mono text-[10px] text-surface-400 uppercase tracking-widest">
+              Directors:
+            </span>
+            {tournament.directors.map((d) => (
+              <span
+                key={d.id}
+                className="inline-block px-2 py-0.5 rounded-md bg-blue-950/30 border border-blue-800 text-blue-400 text-[11px] font-mono"
+              >
+                {formatName(d.displayName)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Champion banner */}
       {champion && (
         <div className="bg-brand-900/30 border border-brand-700 rounded-xl p-4 mb-6 text-center">
-          <span className="text-2xl">🏆</span>
+          <span className="text-2xl">&#127942;</span>
           <p className="font-display text-lg text-brand-300 mt-1">
-            Champion: {champion.winnerName}
+            Champion: {formatName(champion.winnerName)}
           </p>
         </div>
       )}
@@ -177,7 +221,7 @@ export default function TournamentDetail() {
             Unregister
           </button>
         )}
-        {isCreator && tournament.status === "upcoming" && (
+        {canManage && tournament.status === "upcoming" && (
           <button
             onClick={() => handleStatusChange("registration")}
             className="px-4 py-2 rounded-lg bg-blue-950 border border-blue-800 font-body text-xs text-blue-400"
@@ -185,7 +229,7 @@ export default function TournamentDetail() {
             Open Registration
           </button>
         )}
-        {isCreator && tournament.status === "registration" && (
+        {canManage && tournament.status === "registration" && (
           <button
             onClick={handleGenerateBracket}
             className="px-4 py-2 rounded-lg bg-green-950 border border-green-800 font-body text-xs text-green-400"
@@ -199,6 +243,51 @@ export default function TournamentDetail() {
         <p className="text-red-400 font-body text-sm mb-4">{actionMsg}</p>
       )}
 
+      {/* Manage Directors (admin/director only) */}
+      {canManage && (
+        <div className="bg-surface-100/70 border border-surface-200 rounded-xl p-5 mb-6">
+          <h3 className="font-mono text-[10px] text-surface-400 uppercase tracking-widest mb-3">
+            Manage Directors
+          </h3>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {tournament.directors.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-950/30 border border-blue-800"
+              >
+                <span className="text-blue-400 text-[12px] font-body">
+                  {formatName(d.displayName)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={directorToAdd}
+              onChange={(e) => setDirectorToAdd(e.target.value)}
+              className="flex-1 bg-surface-50 border border-surface-200 rounded-lg px-3 py-1.5 text-surface-800 font-body text-sm"
+            >
+              <option value="">Add a director...</option>
+              {allPlayers
+                .filter((p) => ['admin', 'director'].includes(p.role))
+                .filter((p) => !tournament.directors.some((d) => d.id === p.id))
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {formatName(p.display_name)} (@{p.username})
+                  </option>
+                ))}
+            </select>
+            <button
+              onClick={handleAddDirector}
+              disabled={!directorToAdd}
+              className="px-4 py-1.5 rounded-lg bg-blue-950 border border-blue-800 font-body text-xs text-blue-400 disabled:opacity-30"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Bracket */}
       {tournament.bracket.length > 0 && (
         <>
@@ -209,8 +298,8 @@ export default function TournamentDetail() {
         </>
       )}
 
-      {/* Pending matches to record (creator only) */}
-      {isCreator && tournament.status === "in_progress" && pendingMatches.length > 0 && (
+      {/* Pending matches to record (director/admin only) */}
+      {canManage && tournament.status === "in_progress" && pendingMatches.length > 0 && (
         <>
           <h3 className="font-display text-lg text-surface-900 mb-3">Record Match Results</h3>
           <div className="bg-surface-100/70 border border-surface-200 rounded-xl p-5 mb-6">
@@ -221,7 +310,7 @@ export default function TournamentDetail() {
                     R{slot.round}-M{slot.position}
                   </span>
                   <span className="font-body text-[13px] text-surface-700 flex-1">
-                    {slot.player1Name} vs {slot.player2Name}
+                    {formatName(slot.player1Name)} vs {formatName(slot.player2Name)}
                   </span>
                   {recordingMatch?.id === slot.id ? (
                     <div className="flex items-center gap-2">
@@ -231,8 +320,8 @@ export default function TournamentDetail() {
                         className="bg-surface-50 border border-surface-200 rounded px-2 py-1 text-surface-800 font-body text-xs"
                       >
                         <option value="">Winner...</option>
-                        <option value={slot.player1Id}>{slot.player1Name}</option>
-                        <option value={slot.player2Id}>{slot.player2Name}</option>
+                        <option value={slot.player1Id}>{formatName(slot.player1Name)}</option>
+                        <option value={slot.player2Id}>{formatName(slot.player2Name)}</option>
                       </select>
                       <input
                         value={matchScore}
@@ -288,7 +377,7 @@ export default function TournamentDetail() {
                   {p.displayName[0].toUpperCase()}
                 </span>
                 <span className="font-body text-[13px] text-surface-700">
-                  {p.displayName}
+                  {formatName(p.displayName)}
                 </span>
                 {p.seed && (
                   <span className="font-mono text-[10px] text-surface-400">

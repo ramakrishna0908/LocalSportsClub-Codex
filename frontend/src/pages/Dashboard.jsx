@@ -1,8 +1,18 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useSport } from "../context/SportContext";
 import api from "../api/client";
 import StatCard from "../components/StatCard";
 import MatchRow from "../components/MatchRow";
+
+function formatName(displayName) {
+  if (!displayName) return "";
+  const parts = displayName.trim().split(/\s+/);
+  if (parts.length < 2) return displayName;
+  const last = parts[parts.length - 1];
+  const first = parts.slice(0, -1).join(" ");
+  return `${last}, ${first}`;
+}
 
 const ranges = [
   { label: "7D", val: 7 },
@@ -14,18 +24,32 @@ const ranges = [
 
 export default function Dashboard() {
   const { player } = useAuth();
+  const { sport, sportLabel } = useSport();
   const [days, setDays] = useState(7);
   const [matches, setMatches] = useState([]);
+  const [ratings, setRatings] = useState({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    api
-      .get("/matches/my", { params: { days } })
-      .then((res) => setMatches(res.data.matches))
+    Promise.all([
+      api.get("/matches/my", { params: { days, sport } }),
+      api.get(`/players/${player.id}`, { params: { sport } }),
+    ])
+      .then(([matchRes, playerRes]) => {
+        setMatches(matchRes.data.matches);
+        // Build ratings lookup for current sport
+        const sportRatings = {};
+        (playerRes.data.ratings || [])
+          .filter((r) => r.sport === sport)
+          .forEach((r) => {
+            sportRatings[r.rating_type] = r;
+          });
+        setRatings(sportRatings);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [days]);
+  }, [days, sport, player.id]);
 
   const singlesMatches = matches.filter((m) => m.match_type === "singles");
   const doublesMatches = matches.filter((m) => m.match_type === "doubles");
@@ -38,12 +62,16 @@ export default function Dashboard() {
   const sWins = countWins(singlesMatches);
   const dWins = countWins(doublesMatches);
 
+  const skillRating = ratings.skill || {};
+  const leagueRating = ratings.league || {};
+  const tournamentRating = ratings.tournament || {};
+
   return (
     <div>
       {/* Header row */}
       <div className="flex justify-between items-center mb-6 flex-wrap gap-3">
         <h2 className="font-display text-2xl text-surface-900">
-          Welcome back, {player?.display_name}
+          Welcome back, {formatName(player?.display_name)}
         </h2>
         <div className="flex gap-1 bg-surface-50 rounded-lg p-1 border border-surface-200">
           {ranges.map((r) => (
@@ -59,20 +87,30 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      {/* Rating cards - 3 types */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
         <StatCard
-          label="Singles Elo"
-          value={player?.singles_elo || 1000}
-          sub={`${singlesMatches.length} matches`}
+          label="Skill Rating"
+          value={`${skillRating.singles_elo || 1000} / ${skillRating.doubles_elo || 1000}`}
+          sub="Singles / Doubles"
           accentClass="text-brand-300"
         />
         <StatCard
-          label="Doubles Elo"
-          value={player?.doubles_elo || 1000}
-          sub={`${doublesMatches.length} matches`}
+          label="League Rating"
+          value={`${leagueRating.singles_elo || 1000} / ${leagueRating.doubles_elo || 1000}`}
+          sub="Singles / Doubles"
           accentClass="text-blue-400"
         />
+        <StatCard
+          label="Tournament Rating"
+          value={`${tournamentRating.singles_elo || 1000} / ${tournamentRating.doubles_elo || 1000}`}
+          sub="Singles / Doubles"
+          accentClass="text-purple-400"
+        />
+      </div>
+
+      {/* W/L cards */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
         <StatCard
           label="Singles W/L"
           value={`${sWins}/${singlesMatches.length - sWins}`}
@@ -98,7 +136,7 @@ export default function Dashboard() {
       {/* Recent Matches */}
       <div className="bg-surface-100/70 border border-surface-200 rounded-xl p-5">
         <h3 className="font-mono text-[10px] text-surface-400 uppercase tracking-widest mb-4">
-          Recent Matches
+          Recent {sportLabel} Matches
         </h3>
 
         {loading ? (

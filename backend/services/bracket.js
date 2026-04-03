@@ -53,15 +53,17 @@ async function generateBracket(client, tournamentId) {
   }
   const tournament = tourney.rows[0];
   const eloField = tournament.match_type === "singles" ? "singles_elo" : "doubles_elo";
+  const sport = tournament.sport || "ping_pong";
 
-  // Fetch registered players sorted by Elo (best first = seed 1)
+  // Fetch registered players sorted by tournament Elo (best first = seed 1)
   const playersResult = await client.query(
-    `SELECT tp.player_id, p.${eloField} AS elo
+    `SELECT tp.player_id, COALESCE(pr.${eloField}, 1000) AS elo
      FROM tournament_players tp
-     JOIN players p ON p.id = tp.player_id
+     LEFT JOIN player_ratings pr ON pr.player_id = tp.player_id
+       AND pr.sport = $2 AND pr.rating_type = 'tournament'
      WHERE tp.tournament_id = $1
-     ORDER BY p.${eloField} DESC`,
-    [tournamentId]
+     ORDER BY COALESCE(pr.${eloField}, 1000) DESC`,
+    [tournamentId, sport]
   );
   const players = playersResult.rows;
 

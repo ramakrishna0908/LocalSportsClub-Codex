@@ -11,7 +11,7 @@ export function AuthProvider({ children }) {
 
   // Check for existing session on mount
   useEffect(() => {
-    const token = localStorage.getItem("pp_token");
+    const token = localStorage.getItem("lsc_token");
     if (!token) {
       setLoading(false);
       return;
@@ -19,14 +19,14 @@ export function AuthProvider({ children }) {
     api
       .get("/auth/me")
       .then((res) => setPlayer(res.data.player))
-      .catch(() => localStorage.removeItem("pp_token"))
+      .catch(() => localStorage.removeItem("lsc_token"))
       .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(
     async (username, password) => {
       const res = await api.post("/auth/login", { username, password });
-      localStorage.setItem("pp_token", res.data.token);
+      localStorage.setItem("lsc_token", res.data.token);
       setPlayer(res.data.player);
       navigate("/");
     },
@@ -41,7 +41,7 @@ export function AuthProvider({ children }) {
         password,
         email: email || undefined,
       });
-      localStorage.setItem("pp_token", res.data.token);
+      localStorage.setItem("lsc_token", res.data.token);
       setPlayer(res.data.player);
       navigate("/");
     },
@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
     } catch {
       // ignore — token might already be invalid
     }
-    localStorage.removeItem("pp_token");
+    localStorage.removeItem("lsc_token");
     setPlayer(null);
     navigate("/login");
   }, [navigate]);

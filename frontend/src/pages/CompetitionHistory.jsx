@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useSport } from "../context/SportContext";
 import api from "../api/client";
 import Badge from "../components/Badge";
 import CompetitionCard from "../components/CompetitionCard";
@@ -7,6 +8,7 @@ import CompetitionCard from "../components/CompetitionCard";
 const tabs = ["leagues", "tournaments", "matches"];
 
 export default function CompetitionHistory() {
+  const { sport } = useSport();
   const navigate = useNavigate();
   const [tab, setTab] = useState("leagues");
   const [leagues, setLeagues] = useState([]);
@@ -18,24 +20,24 @@ export default function CompetitionHistory() {
     setLoading(true);
     if (tab === "leagues") {
       api
-        .get("/leagues?status=completed")
+        .get("/leagues", { params: { status: "completed", sport } })
         .then((res) => setLeagues(res.data.leagues))
         .catch(console.error)
         .finally(() => setLoading(false));
     } else if (tab === "tournaments") {
       api
-        .get("/tournaments?status=completed")
+        .get("/tournaments", { params: { status: "completed", sport } })
         .then((res) => setTournaments(res.data.tournaments))
         .catch(console.error)
         .finally(() => setLoading(false));
     } else {
       api
-        .get("/matches")
+        .get("/matches", { params: { sport } })
         .then((res) => setMatches(res.data.matches))
         .catch(console.error)
         .finally(() => setLoading(false));
     }
-  }, [tab]);
+  }, [tab, sport]);
 
   const formatDate = (d) =>
     new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });

@@ -1,26 +1,29 @@
 import { useState, useEffect } from "react";
+import { useSport } from "../context/SportContext";
 import api from "../api/client";
 
-const medals = ["🥇", "🥈", "🥉"];
+const medals = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 const medalColors = ["text-brand-300", "text-surface-600", "text-amber-700"];
 
 export default function Rankings() {
+  const { sport, RATING_TYPES } = useSport();
   const [tab, setTab] = useState("singles");
+  const [ratingType, setRatingType] = useState("skill");
   const [rankings, setRankings] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
     api
-      .get(`/rankings/${tab}`)
+      .get(`/rankings/${tab}`, { params: { sport, ratingType } })
       .then((res) => setRankings(res.data.rankings))
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [tab]);
+  }, [tab, sport, ratingType]);
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <h2 className="font-display text-2xl text-surface-900">Leaderboard</h2>
         <div className="flex gap-1 bg-surface-50 rounded-lg p-1 border border-surface-200">
           {["singles", "doubles"].map((t) => (
@@ -34,6 +37,20 @@ export default function Rankings() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Rating type toggle */}
+      <div className="flex gap-1 bg-surface-50 rounded-lg p-1 border border-surface-200 mb-5 w-fit">
+        {RATING_TYPES.map((rt) => (
+          <button
+            key={rt.key}
+            onClick={() => setRatingType(rt.key)}
+            className={`px-3.5 py-1 rounded-md font-mono text-[11px] font-semibold transition-all
+              ${ratingType === rt.key ? "bg-surface-200 text-brand-300" : "text-surface-400 hover:text-surface-600"}`}
+          >
+            {rt.label}
+          </button>
+        ))}
       </div>
 
       <div className="bg-surface-100/70 border border-surface-200 rounded-xl p-5">
@@ -93,7 +110,7 @@ export default function Rankings() {
                 {p.wins}
               </span>
               <span className="font-mono text-xs text-surface-500">
-                {p.played > 0 ? `${p.winRate}%` : "—"}
+                {p.played > 0 ? `${p.winRate}%` : "\u2014"}
               </span>
             </div>
           ))
