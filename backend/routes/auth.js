@@ -12,7 +12,7 @@ const SALT_ROUNDS = 12;
 router.post("/register", async (req, res) => {
   const client = await db.pool.connect();
   try {
-    const { username, displayName, password, email, defaultSport } = req.body;
+    const { username, displayName, password, email, defaultSport, sports } = req.body;
 
     // Validation
     if (!username || username.length < 3) {
@@ -25,7 +25,14 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Display name is required" });
     }
 
-    const sport = defaultSport && validateSport(defaultSport) ? defaultSport : 'ping_pong';
+    // Validate selected sports (at least one required)
+    const selectedSports = (Array.isArray(sports) ? sports : []).filter(s => validateSport(s));
+    if (selectedSports.length === 0) {
+      return res.status(400).json({ error: "Please select at least one sport" });
+    }
+
+    const sport = defaultSport && validateSport(defaultSport) ? defaultSport
+      : selectedSports[0];
 
     // Check existing username
     const existing = await client.query(
@@ -60,8 +67,12 @@ router.post("/register", async (req, res) => {
 
     const player = result.rows[0];
 
-    // Seed player_ratings for all sports and rating types
-    for (const s of VALID_SPORTS) {
+    // Record selected sports and seed ratings only for those
+    for (const s of selectedSports) {
+      await client.query(
+        "INSERT INTO player_sports (player_id, sport) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        [player.id, s]
+      );
       await ensurePlayerRatings(client, [player.id], s);
     }
 
@@ -202,8 +213,17 @@ router.patch("/role", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // GET /api/auth/me
-router.get("/me", requireAuth, (req, res) => {
-  res.json({ player: req.player });
+router.get("/me", requireAuth, async (req, res) => {
+  const sportsResult = await db.query(
+    "SELECT sport FROM player_sports WHERE player_id = $1 ORDER BY sport",
+    [req.player.id]
+  );
+  res.json({
+    player: {
+      ...req.player,
+      sports: sportsResult.rows.map(r => r.sport),
+    },
+  });
 });
 
 module.exports = router;

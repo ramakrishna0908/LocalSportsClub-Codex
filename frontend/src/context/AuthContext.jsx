@@ -34,12 +34,13 @@ export function AuthProvider({ children }) {
   );
 
   const register = useCallback(
-    async ({ username, displayName, password, email }) => {
+    async ({ username, displayName, password, email, sports }) => {
       const res = await api.post("/auth/register", {
         username,
         displayName,
         password,
         email: email || undefined,
+        sports,
       });
       localStorage.setItem("lsc_token", res.data.token);
       setPlayer(res.data.player);

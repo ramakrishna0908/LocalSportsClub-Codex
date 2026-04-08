@@ -19,7 +19,10 @@ const baseTabs = [
   { to: "/rankings", label: "Rankings", icon: "\u{1F3C6}" },
   { to: "/leagues", label: "Leagues", icon: "\u{1F3C5}" },
   { to: "/tournaments", label: "Tourneys", icon: "\u{1F3AF}" },
+  { to: "/clubs", label: "Clubs", icon: "\u{1F3E0}" },
   { to: "/history", label: "History", icon: "\u{1F4CB}" },
+  { to: "/analytics", label: "Analytics", icon: "\u{1F4C8}" },
+  { to: "/help", label: "Help", icon: "\u2753" },
 ];
 
 export default function Header() {

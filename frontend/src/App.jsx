@@ -14,6 +14,10 @@ import Tournaments from "./pages/Tournaments";
 import TournamentDetail from "./pages/TournamentDetail";
 import CompetitionHistory from "./pages/CompetitionHistory";
 import Admin from "./pages/Admin";
+import Analytics from "./pages/Analytics";
+import Help from "./pages/Help";
+import Clubs from "./pages/Clubs";
+import ClubDetail from "./pages/ClubDetail";
 
 function ProtectedRoute({ children }) {
   const { player, loading } = useAuth();
@@ -76,7 +80,11 @@ export default function App() {
                   <Route path="/leagues/:id" element={<LeagueDetail />} />
                   <Route path="/tournaments" element={<Tournaments />} />
                   <Route path="/tournaments/:id" element={<TournamentDetail />} />
+                  <Route path="/clubs" element={<Clubs />} />
+                  <Route path="/clubs/:id" element={<ClubDetail />} />
                   <Route path="/history" element={<CompetitionHistory />} />
+                  <Route path="/analytics" element={<Analytics />} />
+                  <Route path="/help" element={<Help />} />
                   <Route path="/admin" element={<Admin />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

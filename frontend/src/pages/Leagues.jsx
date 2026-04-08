@@ -5,7 +5,14 @@ import { useSport } from "../context/SportContext";
 import api from "../api/client";
 import CompetitionCard from "../components/CompetitionCard";
 
-const statusFilters = ["all", "active", "upcoming", "completed"];
+const statusFilters = ["all", "registration", "active", "upcoming", "completed"];
+const statusLabels = {
+  all: "All",
+  registration: "Registration",
+  active: "Active",
+  upcoming: "Upcoming",
+  completed: "Completed",
+};
 
 export default function Leagues() {
   const { player } = useAuth();
@@ -15,8 +22,9 @@ export default function Leagues() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", matchType: "singles", startDate: "", endDate: "" });
+  const [form, setForm] = useState({ name: "", description: "", matchType: "singles", startDate: "", endDate: "", registrationCloseDate: "", clubId: "" });
   const [msg, setMsg] = useState(null);
+  const [clubs, setClubs] = useState([]);
 
   const fetchLeagues = () => {
     setLoading(true);
@@ -33,15 +41,21 @@ export default function Leagues() {
     fetchLeagues();
   }, [filter, sport]);
 
+  useEffect(() => {
+    api.get("/clubs").then((res) => setClubs(res.data.clubs || [])).catch(() => {});
+  }, []);
+
   const createLeague = async () => {
     setMsg(null);
     try {
       if (!form.name || !form.startDate || !form.endDate) {
         throw new Error("Name, start date, and end date are required");
       }
-      await api.post("/leagues", { ...form, sport });
+      const payload = { ...form, sport };
+      if (!payload.clubId) delete payload.clubId;
+      await api.post("/leagues", payload);
       setShowCreate(false);
-      setForm({ name: "", description: "", matchType: "singles", startDate: "", endDate: "" });
+      setForm({ name: "", description: "", matchType: "singles", startDate: "", endDate: "", registrationCloseDate: "", clubId: "" });
       fetchLeagues();
     } catch (err) {
       setMsg(err.response?.data?.error || err.message);
@@ -82,7 +96,7 @@ export default function Leagues() {
               rows={2}
               className="w-full bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
             />
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <select
                 value={form.matchType}
                 onChange={(e) => setForm({ ...form, matchType: e.target.value })}
@@ -91,18 +105,53 @@ export default function Leagues() {
                 <option value="singles">Singles</option>
                 <option value="doubles">Doubles</option>
               </select>
-              <input
-                type="date"
-                value={form.startDate}
-                onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+              <select
+                value={form.clubId}
+                onChange={(e) => setForm({ ...form, clubId: e.target.value })}
                 className="bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
-              />
-              <input
-                type="date"
-                value={form.endDate}
-                onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                className="bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
-              />
+              >
+                <option value="">No Club</option>
+                {clubs.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              {player?.role === "admin" && (
+                <div>
+                  <label className="font-mono text-[10px] text-surface-400 uppercase tracking-widest mb-1 block">
+                    Reg. Close Date
+                  </label>
+                  <input
+                    type="date"
+                    value={form.registrationCloseDate}
+                    onChange={(e) => setForm({ ...form, registrationCloseDate: e.target.value })}
+                    className="w-full bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
+                  />
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-mono text-[10px] text-surface-400 uppercase tracking-widest mb-1 block">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={form.startDate}
+                  onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                  className="w-full bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
+                />
+              </div>
+              <div>
+                <label className="font-mono text-[10px] text-surface-400 uppercase tracking-widest mb-1 block">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={form.endDate}
+                  onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                  className="w-full bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
+                />
+              </div>
             </div>
             <button
               onClick={createLeague}
@@ -121,10 +170,10 @@ export default function Leagues() {
           <button
             key={s}
             onClick={() => setFilter(s)}
-            className={`px-3.5 py-1 rounded-md font-mono text-[11px] font-semibold transition-all capitalize
+            className={`px-3.5 py-1 rounded-md font-mono text-[11px] font-semibold transition-all
               ${filter === s ? "bg-surface-200 text-brand-300" : "text-surface-400 hover:text-surface-600"}`}
           >
-            {s}
+            {statusLabels[s]}
           </button>
         ))}
       </div>
@@ -144,6 +193,7 @@ export default function Leagues() {
               status={l.status}
               dateInfo={`${formatDate(l.startDate)} - ${formatDate(l.endDate)}`}
               playerCount={l.playerCount}
+              clubName={l.clubName}
               onClick={() => navigate(`/leagues/${l.id}`)}
             />
           ))}

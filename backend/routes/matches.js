@@ -1,6 +1,6 @@
 const express = require("express");
 const db = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, requireAdminOrDirector } = require("../middleware/auth");
 const { processMatchElo } = require("../services/elo");
 const { processMatchUtr } = require("../services/utr");
 const { validateSport, getRatingSystem } = require("../constants");
@@ -12,7 +12,7 @@ router.post("/", requireAuth, async (req, res) => {
   const client = await db.pool.connect();
 
   try {
-    const { matchType, winners, losers, score, leagueId, sport } = req.body;
+    const { matchType, winners, losers, score, leagueId, tournamentId, teamId, opponentTeamId, sport } = req.body;
 
     // Validation
     if (!matchType || !["singles", "doubles"].includes(matchType)) {
@@ -67,15 +67,35 @@ router.post("/", requireAuth, async (req, res) => {
       ratingType = "league";
     }
 
+    // Validate tournament if provided
+    if (tournamentId) {
+      const tourney = await client.query("SELECT * FROM tournaments WHERE id = $1", [tournamentId]);
+      if (tourney.rows.length === 0) {
+        return res.status(400).json({ error: "Tournament not found" });
+      }
+      if (tourney.rows[0].status !== "in_progress") {
+        return res.status(400).json({ error: "Tournament is not in progress" });
+      }
+      if (tourney.rows[0].sport !== sport) {
+        return res.status(400).json({ error: "Sport does not match tournament sport" });
+      }
+      // For team tournaments with 'both' match type, allow any match type
+      if (tourney.rows[0].match_type !== "both" && tourney.rows[0].match_type !== matchType) {
+        return res.status(400).json({ error: "Match type does not match tournament type" });
+      }
+      ratingType = "tournament";
+    }
+
     // Begin transaction
     await client.query("BEGIN");
 
     // Insert match
     const matchResult = await client.query(
-      `INSERT INTO matches (match_type, score, recorded_by, league_id, sport)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO matches (match_type, score, recorded_by, league_id, tournament_id, sport, team1_id, team2_id, winner_team_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [matchType, score || null, req.player.id, leagueId || null, sport]
+      [matchType, score || null, req.player.id, leagueId || null, tournamentId || null, sport,
+       teamId || null, opponentTeamId || null, teamId || null]
     );
     const match = matchResult.rows[0];
 
@@ -225,6 +245,177 @@ router.get("/my", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("My matches error:", err);
     res.status(500).json({ error: "Failed to fetch matches" });
+  }
+});
+
+// DELETE /api/matches/:id — admin/director can delete a match and reverse ratings
+router.delete("/:id", requireAuth, requireAdminOrDirector, async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    const { id } = req.params;
+
+    // Get the match with players
+    const matchResult = await client.query("SELECT * FROM matches WHERE id = $1", [id]);
+    if (matchResult.rows.length === 0) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+    const match = matchResult.rows[0];
+
+    // Get match players with their elo_before/elo_after
+    const mpResult = await client.query(
+      "SELECT player_id, team, elo_before, elo_after FROM match_players WHERE match_id = $1",
+      [id]
+    );
+
+    // Determine rating type
+    let ratingType = "skill";
+    if (match.league_id) ratingType = "league";
+
+    const isUtr = getRatingSystem(match.sport) === "utr";
+    const eloField = match.match_type === "singles"
+      ? (isUtr ? "singles_utr" : "singles_elo")
+      : (isUtr ? "doubles_utr" : "doubles_elo");
+
+    await client.query("BEGIN");
+
+    // Reverse rating changes for each player
+    for (const mp of mpResult.rows) {
+      if (mp.elo_before !== null && mp.elo_after !== null) {
+        if (isUtr) {
+          // UTR was stored as integer * 100
+          const oldUtr = mp.elo_before / 100;
+          await client.query(
+            `UPDATE player_ratings SET ${eloField} = $1
+             WHERE player_id = $2 AND sport = $3 AND rating_type = $4`,
+            [oldUtr, mp.player_id, match.sport, ratingType]
+          );
+        } else {
+          await client.query(
+            `UPDATE player_ratings SET ${eloField} = $1
+             WHERE player_id = $2 AND sport = $3 AND rating_type = $4`,
+            [mp.elo_before, mp.player_id, match.sport, ratingType]
+          );
+        }
+      }
+    }
+
+    // Delete match_players and match
+    await client.query("DELETE FROM match_players WHERE match_id = $1", [id]);
+    await client.query("DELETE FROM matches WHERE id = $1", [id]);
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Match deleted and ratings reversed" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Delete match error:", err);
+    res.status(500).json({ error: "Failed to delete match" });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/matches/:id — admin/director can update score and/or swap winner/loser
+router.patch("/:id", requireAuth, requireAdminOrDirector, async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    const { id } = req.params;
+    const { score, swapResult } = req.body;
+
+    const matchResult = await client.query("SELECT * FROM matches WHERE id = $1", [id]);
+    if (matchResult.rows.length === 0) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+    const match = matchResult.rows[0];
+
+    await client.query("BEGIN");
+
+    // Update score if provided
+    if (score !== undefined) {
+      await client.query("UPDATE matches SET score = $1 WHERE id = $2", [score || null, id]);
+    }
+
+    // Swap winner/loser if requested
+    if (swapResult) {
+      const mpResult = await client.query(
+        "SELECT player_id, team, elo_before, elo_after FROM match_players WHERE match_id = $1",
+        [id]
+      );
+
+      let ratingType = "skill";
+      if (match.league_id) ratingType = "league";
+
+      const isUtr = getRatingSystem(match.sport) === "utr";
+      const eloField = match.match_type === "singles"
+        ? (isUtr ? "singles_utr" : "singles_elo")
+        : (isUtr ? "doubles_utr" : "doubles_elo");
+
+      // Step 1: Reverse all rating changes (restore elo_before)
+      for (const mp of mpResult.rows) {
+        if (mp.elo_before !== null && mp.elo_after !== null) {
+          if (isUtr) {
+            const oldUtr = mp.elo_before / 100;
+            await client.query(
+              `UPDATE player_ratings SET ${eloField} = $1
+               WHERE player_id = $2 AND sport = $3 AND rating_type = $4`,
+              [oldUtr, mp.player_id, match.sport, ratingType]
+            );
+          } else {
+            await client.query(
+              `UPDATE player_ratings SET ${eloField} = $1
+               WHERE player_id = $2 AND sport = $3 AND rating_type = $4`,
+              [mp.elo_before, mp.player_id, match.sport, ratingType]
+            );
+          }
+        }
+      }
+
+      // Step 2: Swap teams in match_players
+      await client.query(
+        `UPDATE match_players SET team = CASE WHEN team = 'winner' THEN 'loser' ELSE 'winner' END WHERE match_id = $1`,
+        [id]
+      );
+
+      // Step 3: Recalculate ratings with swapped result
+      const newWinners = mpResult.rows.filter(p => p.team === "loser").map(p => p.player_id);
+      const newLosers = mpResult.rows.filter(p => p.team === "winner").map(p => p.player_id);
+
+      if (isUtr) {
+        await processMatchUtr(client, match.id, match.match_type, newWinners, newLosers, match.sport, ratingType);
+      } else {
+        await processMatchElo(client, match.id, match.match_type, newWinners, newLosers, match.sport, ratingType);
+      }
+    }
+
+    await client.query("COMMIT");
+
+    // Fetch updated match
+    const fullMatch = await db.query(
+      `SELECT m.*,
+         json_agg(
+           json_build_object(
+             'player_id', mp.player_id,
+             'display_name', p.display_name,
+             'team', mp.team,
+             'elo_before', mp.elo_before,
+             'elo_after', mp.elo_after
+           )
+         ) as players
+       FROM matches m
+       JOIN match_players mp ON mp.match_id = m.id
+       JOIN players p ON p.id = mp.player_id
+       WHERE m.id = $1
+       GROUP BY m.id`,
+      [id]
+    );
+
+    res.json({ match: fullMatch.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Update match error:", err);
+    res.status(500).json({ error: "Failed to update match" });
+  } finally {
+    client.release();
   }
 });
 

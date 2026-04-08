@@ -9,6 +9,8 @@ const rankingRoutes = require("./routes/rankings");
 const leagueRoutes = require("./routes/leagues");
 const tournamentRoutes = require("./routes/tournaments");
 const settingsRoutes = require("./routes/settings");
+const analyticsRoutes = require("./routes/analytics");
+const clubRoutes = require("./routes/clubs");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -37,6 +39,8 @@ app.use("/api/rankings", rankingRoutes);
 app.use("/api/leagues", leagueRoutes);
 app.use("/api/tournaments", tournamentRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/clubs", clubRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

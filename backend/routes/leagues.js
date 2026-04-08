@@ -2,6 +2,8 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireAdminOrDirector } = require("../middleware/auth");
 const { validateSport, getRatingSystem } = require("../constants");
+const { getDefaultElo, getDefaultUtr, getDefaultRating } = require("../services/ratingDefaults");
+const { isClubAdmin } = require("./clubs");
 
 const router = express.Router();
 
@@ -15,17 +17,24 @@ async function isLeagueDirector(leagueId, playerId, client) {
   return result.rows.length > 0;
 }
 
-// Helper: check if player can manage a league (admin or league director)
+// Helper: check if player can manage a league (site admin, league director, or club admin of league's club)
 async function canManageLeague(leagueId, player, client) {
   if (player.role === 'admin') return true;
-  return isLeagueDirector(leagueId, player.id, client);
+  if (await isLeagueDirector(leagueId, player.id, client)) return true;
+  // Check if player is admin of the league's club
+  const conn = client || db;
+  const league = await conn.query("SELECT club_id FROM leagues WHERE id = $1", [leagueId]);
+  if (league.rows.length > 0 && league.rows[0].club_id) {
+    if (await isClubAdmin(league.rows[0].club_id, player.id, client)) return true;
+  }
+  return false;
 }
 
 // POST /api/leagues — create a new league (admin or director only)
 router.post("/", requireAuth, requireAdminOrDirector, async (req, res) => {
   const client = await db.pool.connect();
   try {
-    const { name, description, matchType, startDate, endDate, sport } = req.body;
+    const { name, description, matchType, startDate, endDate, sport, registrationCloseDate, clubId } = req.body;
 
     if (!name || !matchType || !startDate || !endDate) {
       return res.status(400).json({ error: "name, matchType, startDate, and endDate are required" });
@@ -39,14 +48,17 @@ router.post("/", requireAuth, requireAdminOrDirector, async (req, res) => {
     if (new Date(endDate) <= new Date(startDate)) {
       return res.status(400).json({ error: "endDate must be after startDate" });
     }
+    if (registrationCloseDate && registrationCloseDate > endDate) {
+      return res.status(400).json({ error: "registrationCloseDate must be on or before endDate" });
+    }
 
     await client.query("BEGIN");
 
     const result = await client.query(
-      `INSERT INTO leagues (name, description, match_type, start_date, end_date, created_by, sport)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO leagues (name, description, match_type, start_date, end_date, created_by, sport, registration_close_date, club_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [name, description || null, matchType, startDate, endDate, req.player.id, sport]
+      [name, description || null, matchType, startDate, endDate, req.player.id, sport, registrationCloseDate || null, clubId || null]
     );
     const league = result.rows[0];
 
@@ -78,11 +90,11 @@ router.post("/", requireAuth, requireAdminOrDirector, async (req, res) => {
 // GET /api/leagues — list leagues with optional filters
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const { status, matchType, sport } = req.query;
+    const { status, matchType, sport, clubId } = req.query;
     const conditions = [];
     const params = [];
 
-    if (status && ["upcoming", "active", "completed"].includes(status)) {
+    if (status && ["upcoming", "registration", "active", "completed"].includes(status)) {
       params.push(status);
       conditions.push(`l.status = $${params.length}`);
     }
@@ -94,21 +106,28 @@ router.get("/", requireAuth, async (req, res) => {
       params.push(sport);
       conditions.push(`l.sport = $${params.length}`);
     }
+    if (clubId) {
+      params.push(clubId);
+      conditions.push(`l.club_id = $${params.length}`);
+    }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const result = await db.query(
       `SELECT l.*,
          p.display_name AS created_by_name,
+         c.name AS club_name,
          (SELECT COUNT(*) FROM league_players lp WHERE lp.league_id = l.id) AS player_count
        FROM leagues l
        JOIN players p ON p.id = l.created_by
+       LEFT JOIN clubs c ON c.id = l.club_id
        ${whereClause}
        ORDER BY
          CASE l.status
            WHEN 'active' THEN 0
-           WHEN 'upcoming' THEN 1
-           WHEN 'completed' THEN 2
+           WHEN 'registration' THEN 1
+           WHEN 'upcoming' THEN 2
+           WHEN 'completed' THEN 3
          END,
          l.start_date DESC`,
       params
@@ -125,7 +144,10 @@ router.get("/", requireAuth, async (req, res) => {
       endDate: row.end_date,
       createdBy: row.created_by,
       createdByName: row.created_by_name,
+      clubId: row.club_id,
+      clubName: row.club_name,
       playerCount: parseInt(row.player_count),
+      registrationCloseDate: row.registration_close_date,
       createdAt: row.created_at,
     }));
 
@@ -142,9 +164,10 @@ router.get("/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
 
     const leagueResult = await db.query(
-      `SELECT l.*, p.display_name AS created_by_name
+      `SELECT l.*, p.display_name AS created_by_name, c.name AS club_name
        FROM leagues l
        JOIN players p ON p.id = l.created_by
+       LEFT JOIN clubs c ON c.id = l.club_id
        WHERE l.id = $1`,
       [id]
     );
@@ -155,13 +178,15 @@ router.get("/:id", requireAuth, async (req, res) => {
     const leagueSport = row.sport || "ping_pong";
 
     const isUtr = getRatingSystem(leagueSport) === "utr";
+    const defaultElo = await getDefaultElo();
+    const defaultUtr = await getDefaultUtr();
 
     const playersResult = await db.query(
       `SELECT p.id, p.username, p.display_name, lp.joined_at,
-              COALESCE(pr.singles_elo, 1000) AS singles_elo,
-              COALESCE(pr.doubles_elo, 1000) AS doubles_elo,
-              COALESCE(pr.singles_utr, 5.0) AS singles_utr,
-              COALESCE(pr.doubles_utr, 5.0) AS doubles_utr
+              COALESCE(pr.singles_elo, ${defaultElo}) AS singles_elo,
+              COALESCE(pr.doubles_elo, ${defaultElo}) AS doubles_elo,
+              COALESCE(pr.singles_utr, ${defaultUtr}) AS singles_utr,
+              COALESCE(pr.doubles_utr, ${defaultUtr}) AS doubles_utr
        FROM league_players lp
        JOIN players p ON p.id = lp.player_id
        LEFT JOIN player_ratings pr ON pr.player_id = p.id
@@ -194,10 +219,10 @@ router.get("/:id", requireAuth, async (req, res) => {
       const groupIds = groupsResult.rows.map(g => g.id);
       const gpResult = await db.query(
         `SELECT lgp.group_id, lgp.position, p.id AS player_id, p.display_name, p.username,
-                COALESCE(pr.singles_elo, 1000) AS singles_elo,
-                COALESCE(pr.doubles_elo, 1000) AS doubles_elo,
-                COALESCE(pr.singles_utr, 5.0) AS singles_utr,
-                COALESCE(pr.doubles_utr, 5.0) AS doubles_utr
+                COALESCE(pr.singles_elo, ${defaultElo}) AS singles_elo,
+                COALESCE(pr.doubles_elo, ${defaultElo}) AS doubles_elo,
+                COALESCE(pr.singles_utr, ${defaultUtr}) AS singles_utr,
+                COALESCE(pr.doubles_utr, ${defaultUtr}) AS doubles_utr
          FROM league_group_players lgp
          JOIN players p ON p.id = lgp.player_id
          LEFT JOIN player_ratings pr ON pr.player_id = p.id
@@ -266,6 +291,9 @@ router.get("/:id", requireAuth, async (req, res) => {
       endDate: row.end_date,
       createdBy: row.created_by,
       createdByName: row.created_by_name,
+      clubId: row.club_id,
+      clubName: row.club_name,
+      registrationCloseDate: row.registration_close_date,
       createdAt: row.created_at,
       ratingSystem: isUtr ? "utr" : "elo",
       players: playersResult.rows.map((p) => ({
@@ -311,8 +339,8 @@ router.post("/:id/join", requireAuth, async (req, res) => {
     if (league.rows.length === 0) {
       return res.status(404).json({ error: "League not found" });
     }
-    if (!["upcoming", "active"].includes(league.rows[0].status)) {
-      return res.status(400).json({ error: "Cannot join a completed league" });
+    if (!["upcoming", "registration"].includes(league.rows[0].status)) {
+      return res.status(400).json({ error: "Registration is closed. You can only join leagues that are open for registration." });
     }
 
     await db.query(
@@ -337,8 +365,8 @@ router.post("/:id/leave", requireAuth, async (req, res) => {
     if (league.rows.length === 0) {
       return res.status(404).json({ error: "League not found" });
     }
-    if (league.rows[0].status === "completed") {
-      return res.status(400).json({ error: "Cannot leave a completed league" });
+    if (["active", "completed"].includes(league.rows[0].status)) {
+      return res.status(400).json({ error: "Cannot leave an active or completed league" });
     }
 
     await db.query(
@@ -368,7 +396,8 @@ router.patch("/:id/status", requireAuth, async (req, res) => {
     }
 
     const validTransitions = {
-      upcoming: ["active"],
+      upcoming: ["registration"],
+      registration: ["active"],
       active: ["completed"],
     };
     const allowed = validTransitions[league.rows[0].status] || [];
@@ -448,6 +477,68 @@ router.delete("/:id/directors/:playerId", requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/leagues/:id — update league settings (dates, etc.) — admin only
+router.patch("/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { registrationCloseDate, startDate, endDate } = req.body;
+
+    const league = await db.query("SELECT * FROM leagues WHERE id = $1", [id]);
+    if (league.rows.length === 0) {
+      return res.status(404).json({ error: "League not found" });
+    }
+
+    const isAdmin = req.player.role === 'admin';
+    const isDirector = await isLeagueDirector(id, req.player.id);
+
+    // Registration close date: admin only. Dates: admin or director.
+    if (registrationCloseDate !== undefined && !isAdmin) {
+      return res.status(403).json({ error: "Only admins can update registration close date" });
+    }
+    if ((startDate || endDate) && !isAdmin && !isDirector) {
+      return res.status(403).json({ error: "Only admins or league directors can update dates" });
+    }
+    if (!isAdmin && !isDirector) {
+      return res.status(403).json({ error: "Only admins or league directors can update league settings" });
+    }
+
+    // Use new values if provided, otherwise fall back to existing
+    const effectiveStart = startDate || new Date(league.rows[0].start_date).toISOString().split("T")[0];
+    const effectiveEnd = endDate || new Date(league.rows[0].end_date).toISOString().split("T")[0];
+
+    if (startDate || endDate) {
+      if (effectiveEnd <= effectiveStart) {
+        return res.status(400).json({ error: "End date must be after start date" });
+      }
+    }
+
+    if (startDate) {
+      await db.query("UPDATE leagues SET start_date = $1 WHERE id = $2", [startDate, id]);
+    }
+    if (endDate) {
+      await db.query("UPDATE leagues SET end_date = $1 WHERE id = $2", [endDate, id]);
+    }
+
+    if (registrationCloseDate !== undefined) {
+      if (registrationCloseDate) {
+        const closeStr = new Date(registrationCloseDate).toISOString().split("T")[0];
+        if (closeStr > effectiveEnd) {
+          return res.status(400).json({ error: "Registration close date must be on or before the end date" });
+        }
+      }
+      await db.query(
+        "UPDATE leagues SET registration_close_date = $1 WHERE id = $2",
+        [registrationCloseDate || null, id]
+      );
+    }
+
+    res.json({ message: "League updated" });
+  } catch (err) {
+    console.error("Update league error:", err);
+    res.status(500).json({ error: "Failed to update league" });
+  }
+});
+
 // POST /api/leagues/:id/shuffle-groups — create groups based on rankings
 router.post("/:id/shuffle-groups", requireAuth, async (req, res) => {
   const client = await db.pool.connect();
@@ -483,7 +574,7 @@ router.post("/:id/shuffle-groups", requireAuth, async (req, res) => {
     const ratingField = isUtr
       ? (matchType === "doubles" ? "doubles_utr" : "singles_utr")
       : (matchType === "doubles" ? "doubles_elo" : "singles_elo");
-    const defaultVal = isUtr ? 5.0 : 1000;
+    const defaultVal = await getDefaultRating(leagueSport);
     const size = groupSize || 3;
 
     // Get players ordered by their league rating (descending)

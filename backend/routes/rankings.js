@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { validateSport, validateRatingType, getRatingSystem } = require("../constants");
+const { getDefaultRating } = require("../services/ratingDefaults");
 
 const router = express.Router();
 
@@ -19,7 +20,7 @@ router.get("/singles", requireAuth, async (req, res) => {
 
     const isUtr = getRatingSystem(sport) === "utr";
     const ratingCol = isUtr ? "singles_utr" : "singles_elo";
-    const defaultVal = isUtr ? 5.0 : 1000;
+    const defaultVal = await getDefaultRating(sport);
 
     const result = await db.query(
       `SELECT
@@ -28,6 +29,7 @@ router.get("/singles", requireAuth, async (req, res) => {
          COUNT(mp.id) FILTER (WHERE m.match_type = 'singles' AND m.sport = $1) AS played,
          COUNT(mp.id) FILTER (WHERE m.match_type = 'singles' AND m.sport = $1 AND mp.team = 'winner') AS wins
        FROM players p
+       JOIN player_sports ps ON ps.player_id = p.id AND ps.sport = $1
        LEFT JOIN player_ratings pr ON pr.player_id = p.id
          AND pr.sport = $1 AND pr.rating_type = $2
        LEFT JOIN match_players mp ON mp.player_id = p.id
@@ -50,7 +52,7 @@ router.get("/singles", requireAuth, async (req, res) => {
         : 0,
     }));
 
-    res.json({ rankings, ratingSystem: isUtr ? "utr" : "elo" });
+    res.json({ rankings, ratingSystem: isUtr ? "utr" : "elo", defaultRating: defaultVal });
   } catch (err) {
     console.error("Singles rankings error:", err);
     res.status(500).json({ error: "Failed to fetch rankings" });
@@ -71,7 +73,7 @@ router.get("/doubles", requireAuth, async (req, res) => {
 
     const isUtr = getRatingSystem(sport) === "utr";
     const ratingCol = isUtr ? "doubles_utr" : "doubles_elo";
-    const defaultVal = isUtr ? 5.0 : 1000;
+    const defaultVal = await getDefaultRating(sport);
 
     const result = await db.query(
       `SELECT
@@ -80,6 +82,7 @@ router.get("/doubles", requireAuth, async (req, res) => {
          COUNT(mp.id) FILTER (WHERE m.match_type = 'doubles' AND m.sport = $1) AS played,
          COUNT(mp.id) FILTER (WHERE m.match_type = 'doubles' AND m.sport = $1 AND mp.team = 'winner') AS wins
        FROM players p
+       JOIN player_sports ps ON ps.player_id = p.id AND ps.sport = $1
        LEFT JOIN player_ratings pr ON pr.player_id = p.id
          AND pr.sport = $1 AND pr.rating_type = $2
        LEFT JOIN match_players mp ON mp.player_id = p.id
@@ -102,7 +105,7 @@ router.get("/doubles", requireAuth, async (req, res) => {
         : 0,
     }));
 
-    res.json({ rankings, ratingSystem: isUtr ? "utr" : "elo" });
+    res.json({ rankings, ratingSystem: isUtr ? "utr" : "elo", defaultRating: defaultVal });
   } catch (err) {
     console.error("Doubles rankings error:", err);
     res.status(500).json({ error: "Failed to fetch rankings" });

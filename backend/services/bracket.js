@@ -1,5 +1,6 @@
 /**
  * Single-elimination bracket generation and management.
+ * Supports both individual and team tournaments.
  */
 
 /**
@@ -36,14 +37,10 @@ function generateSeedOrder(bracketSize) {
 }
 
 /**
- * Generate bracket for a tournament.
+ * Generate bracket for an INDIVIDUAL tournament.
  * Must be called within a transaction.
- *
- * @param {object} client - pg client (inside transaction)
- * @param {number} tournamentId
  */
 async function generateBracket(client, tournamentId) {
-  // Fetch tournament info
   const tourney = await client.query(
     "SELECT * FROM tournaments WHERE id = $1",
     [tournamentId]
@@ -55,7 +52,6 @@ async function generateBracket(client, tournamentId) {
   const eloField = tournament.match_type === "singles" ? "singles_elo" : "doubles_elo";
   const sport = tournament.sport || "ping_pong";
 
-  // Fetch registered players sorted by tournament Elo (best first = seed 1)
   const playersResult = await client.query(
     `SELECT tp.player_id, COALESCE(pr.${eloField}, 1000) AS elo
      FROM tournament_players tp
@@ -119,7 +115,6 @@ async function generateBracket(client, tournamentId) {
   for (let pos = 0; pos < firstRoundMatchups.length; pos++) {
     const { player1, player2 } = firstRoundMatchups[pos];
     if (player1 && !player2) {
-      // player1 gets a bye
       await client.query(
         `UPDATE tournament_brackets SET winner_id = $1
          WHERE tournament_id = $2 AND round = 1 AND position = $3`,
@@ -127,7 +122,6 @@ async function generateBracket(client, tournamentId) {
       );
       await advanceWinner(client, tournamentId, 1, pos + 1, player1, totalRounds);
     } else if (!player1 && player2) {
-      // player2 gets a bye
       await client.query(
         `UPDATE tournament_brackets SET winner_id = $1
          WHERE tournament_id = $2 AND round = 1 AND position = $3`,
@@ -145,18 +139,152 @@ async function generateBracket(client, tournamentId) {
 }
 
 /**
- * Advance a winner to the next round of the bracket.
- *
- * @param {object} client - pg client (inside transaction)
- * @param {number} tournamentId
- * @param {number} round - current round
- * @param {number} position - current position (1-based)
- * @param {number} winnerId - player who won
- * @param {number} totalRounds - total rounds in bracket
+ * Generate bracket for a TEAM tournament (knockout format).
+ */
+async function generateTeamBracket(client, tournamentId) {
+  const tourney = await client.query(
+    "SELECT * FROM tournaments WHERE id = $1",
+    [tournamentId]
+  );
+  if (tourney.rows.length === 0) {
+    throw new Error("Tournament not found");
+  }
+
+  const teamsResult = await client.query(
+    `SELECT id, name FROM tournament_teams WHERE tournament_id = $1 ORDER BY id`,
+    [tournamentId]
+  );
+  const teams = teamsResult.rows;
+
+  if (teams.length < 2) {
+    throw new Error("Need at least 2 teams to generate a bracket");
+  }
+
+  // Assign seeds (simple order for teams)
+  for (let i = 0; i < teams.length; i++) {
+    await client.query(
+      "UPDATE tournament_teams SET seed = $1 WHERE id = $2",
+      [i + 1, teams[i].id]
+    );
+  }
+
+  const bracketSize = nextPowerOf2(teams.length);
+  const totalRounds = Math.log2(bracketSize);
+  const seedOrder = generateSeedOrder(bracketSize);
+
+  const firstRoundMatchups = [];
+  for (let i = 0; i < bracketSize; i += 2) {
+    const seed1 = seedOrder[i];
+    const seed2 = seedOrder[i + 1];
+    const team1 = seed1 <= teams.length ? teams[seed1 - 1] : null;
+    const team2 = seed2 <= teams.length ? teams[seed2 - 1] : null;
+    firstRoundMatchups.push({ team1, team2 });
+  }
+
+  // Insert first-round bracket slots
+  for (let pos = 0; pos < firstRoundMatchups.length; pos++) {
+    const { team1, team2 } = firstRoundMatchups[pos];
+    await client.query(
+      `INSERT INTO tournament_brackets (tournament_id, round, position, team1_id, team2_id)
+       VALUES ($1, 1, $2, $3, $4)`,
+      [tournamentId, pos + 1, team1?.id || null, team2?.id || null]
+    );
+  }
+
+  // Create empty bracket slots for subsequent rounds
+  for (let round = 2; round <= totalRounds; round++) {
+    const matchesInRound = bracketSize / Math.pow(2, round);
+    for (let pos = 1; pos <= matchesInRound; pos++) {
+      await client.query(
+        `INSERT INTO tournament_brackets (tournament_id, round, position)
+         VALUES ($1, $2, $3)`,
+        [tournamentId, round, pos]
+      );
+    }
+  }
+
+  // Auto-advance byes in first round
+  for (let pos = 0; pos < firstRoundMatchups.length; pos++) {
+    const { team1, team2 } = firstRoundMatchups[pos];
+    if (team1 && !team2) {
+      await client.query(
+        `UPDATE tournament_brackets SET winner_team_id = $1
+         WHERE tournament_id = $2 AND round = 1 AND position = $3`,
+        [team1.id, tournamentId, pos + 1]
+      );
+      await advanceTeamWinner(client, tournamentId, 1, pos + 1, team1.id, totalRounds);
+    } else if (!team1 && team2) {
+      await client.query(
+        `UPDATE tournament_brackets SET winner_team_id = $1
+         WHERE tournament_id = $2 AND round = 1 AND position = $3`,
+        [team2.id, tournamentId, pos + 1]
+      );
+      await advanceTeamWinner(client, tournamentId, 1, pos + 1, team2.id, totalRounds);
+    }
+  }
+
+  await client.query(
+    "UPDATE tournaments SET status = 'in_progress' WHERE id = $1",
+    [tournamentId]
+  );
+}
+
+/**
+ * Generate round-robin fixtures for a team tournament.
+ */
+async function generateTeamRoundRobin(client, tournamentId) {
+  const tourney = await client.query(
+    "SELECT * FROM tournaments WHERE id = $1",
+    [tournamentId]
+  );
+  if (tourney.rows.length === 0) {
+    throw new Error("Tournament not found");
+  }
+
+  const teamsResult = await client.query(
+    `SELECT id, name FROM tournament_teams WHERE tournament_id = $1 ORDER BY id`,
+    [tournamentId]
+  );
+  const teams = teamsResult.rows;
+
+  if (teams.length < 2) {
+    throw new Error("Need at least 2 teams for round-robin");
+  }
+
+  // Initialize standings
+  for (const team of teams) {
+    await client.query(
+      `INSERT INTO tournament_round_robin (tournament_id, team_id) VALUES ($1, $2)
+       ON CONFLICT (tournament_id, team_id) DO NOTHING`,
+      [tournamentId, team.id]
+    );
+  }
+
+  // Generate round-robin fixtures: every team plays every other team once
+  let round = 1;
+  let position = 1;
+  for (let i = 0; i < teams.length; i++) {
+    for (let j = i + 1; j < teams.length; j++) {
+      await client.query(
+        `INSERT INTO tournament_brackets (tournament_id, round, position, team1_id, team2_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [tournamentId, round, position, teams[i].id, teams[j].id]
+      );
+      position++;
+    }
+  }
+
+  await client.query(
+    "UPDATE tournaments SET status = 'in_progress' WHERE id = $1",
+    [tournamentId]
+  );
+}
+
+/**
+ * Advance a winner (individual) to the next round of the bracket.
  */
 async function advanceWinner(client, tournamentId, round, position, winnerId, totalRounds) {
   if (round >= totalRounds) {
-    // This was the final — tournament is complete
     await client.query(
       "UPDATE tournaments SET status = 'completed' WHERE id = $1",
       [tournamentId]
@@ -167,7 +295,6 @@ async function advanceWinner(client, tournamentId, round, position, winnerId, to
   const nextRound = round + 1;
   const nextPosition = Math.ceil(position / 2);
 
-  // Determine if winner goes to player1 or player2 slot
   const isPlayer1 = position % 2 === 1;
   const field = isPlayer1 ? "player1_id" : "player2_id";
 
@@ -178,4 +305,35 @@ async function advanceWinner(client, tournamentId, round, position, winnerId, to
   );
 }
 
-module.exports = { generateBracket, advanceWinner, nextPowerOf2 };
+/**
+ * Advance a team winner to the next round of the bracket.
+ */
+async function advanceTeamWinner(client, tournamentId, round, position, teamId, totalRounds) {
+  if (round >= totalRounds) {
+    await client.query(
+      "UPDATE tournaments SET status = 'completed' WHERE id = $1",
+      [tournamentId]
+    );
+    return;
+  }
+
+  const nextRound = round + 1;
+  const nextPosition = Math.ceil(position / 2);
+  const isTeam1 = position % 2 === 1;
+  const field = isTeam1 ? "team1_id" : "team2_id";
+
+  await client.query(
+    `UPDATE tournament_brackets SET ${field} = $1
+     WHERE tournament_id = $2 AND round = $3 AND position = $4`,
+    [teamId, tournamentId, nextRound, nextPosition]
+  );
+}
+
+module.exports = {
+  generateBracket,
+  generateTeamBracket,
+  generateTeamRoundRobin,
+  advanceWinner,
+  advanceTeamWinner,
+  nextPowerOf2,
+};

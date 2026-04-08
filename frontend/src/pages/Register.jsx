@@ -2,6 +2,12 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+const SPORTS = [
+  { key: "ping_pong", label: "Ping Pong", emoji: "\u{1F3D3}" },
+  { key: "pickleball", label: "Pickleball", emoji: "\u{1F94F}" },
+  { key: "tennis", label: "Tennis", emoji: "\u{1F3BE}" },
+];
+
 export default function Register() {
   const [form, setForm] = useState({
     username: "",
@@ -10,11 +16,18 @@ export default function Register() {
     password: "",
     confirmPassword: "",
   });
+  const [selectedSports, setSelectedSports] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
 
   const set = (key, val) => setForm((prev) => ({ ...prev, [key]: val }));
+
+  const toggleSport = (key) => {
+    setSelectedSports((prev) =>
+      prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]
+    );
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,6 +45,9 @@ export default function Register() {
     if (form.password !== form.confirmPassword) {
       return setError("Passwords do not match");
     }
+    if (selectedSports.length === 0) {
+      return setError("Please select at least one sport");
+    }
 
     setLoading(true);
     try {
@@ -40,6 +56,7 @@ export default function Register() {
         displayName: form.displayName,
         password: form.password,
         email: form.email,
+        sports: selectedSports,
       });
     } catch (err) {
       setError(err.response?.data?.error || "Registration failed");
@@ -106,6 +123,36 @@ export default function Register() {
                 placeholder="john@example.com"
                 className="w-full bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-surface-800 font-body text-sm"
               />
+            </div>
+
+            {/* Sport Selection */}
+            <div>
+              <label className="block font-mono text-[10px] text-surface-500 uppercase tracking-widest mb-2">
+                Sports you play *
+              </label>
+              <div className="flex gap-2">
+                {SPORTS.map((s) => {
+                  const selected = selectedSports.includes(s.key);
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => toggleSport(s.key)}
+                      className={`flex-1 flex flex-col items-center gap-1 py-3 rounded-lg border text-sm font-body transition-all
+                        ${selected
+                          ? "bg-brand-800 border-brand-500 text-brand-300"
+                          : "bg-surface-50 border-surface-200 text-surface-400 hover:border-surface-300"
+                        }`}
+                    >
+                      <span className="text-xl">{s.emoji}</span>
+                      <span className="font-mono text-[10px] font-semibold">{s.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="font-mono text-[9px] text-surface-400 mt-1.5">
+                Select at least one. You can change this later.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

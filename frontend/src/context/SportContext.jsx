@@ -49,7 +49,7 @@ export function SportProvider({ children }) {
         ratingSystem: sportConfig.ratingSystem,
         isUtr: sportConfig.ratingSystem === "utr",
         ratingLabel: sportConfig.ratingSystem === "utr" ? "UTR" : "Elo",
-        defaultRating: sportConfig.ratingSystem === "utr" ? 5.0 : 1000,
+        defaultRating: sportConfig.ratingSystem === "utr" ? 1.0 : 1000, // fallback; backend reads from DB
         SPORTS,
         RATING_TYPES,
       }}

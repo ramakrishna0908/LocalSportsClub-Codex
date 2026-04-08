@@ -1,4 +1,4 @@
-export default function BracketView({ bracket }) {
+export default function BracketView({ bracket, isTeam }) {
   if (!bracket || bracket.length === 0) {
     return (
       <p className="text-center text-surface-400 font-body text-sm py-8 italic">
@@ -39,12 +39,12 @@ export default function BracketView({ bracket }) {
 
             <div
               className="flex flex-col gap-3 justify-around flex-1"
-              style={{ minWidth: 180 }}
+              style={{ minWidth: 200 }}
             >
               {rounds[round]
                 .sort((a, b) => a.position - b.position)
                 .map((slot) => (
-                  <MatchupBox key={slot.id} slot={slot} />
+                  <MatchupBox key={slot.id} slot={slot} isTeam={isTeam} />
                 ))}
             </div>
           </div>
@@ -54,9 +54,29 @@ export default function BracketView({ bracket }) {
   );
 }
 
-function MatchupBox({ slot }) {
-  const { player1Id, player1Name, player2Id, player2Name, winnerId } = slot;
+function MatchupBox({ slot, isTeam }) {
+  if (isTeam) {
+    const { team1Id, team1Name, team2Id, team2Name, winnerTeamId } = slot;
+    return (
+      <div className="bg-surface-100/70 border border-surface-200 rounded-lg overflow-hidden">
+        <TeamSlot
+          name={team1Name}
+          teamId={team1Id}
+          isWinner={winnerTeamId && winnerTeamId === team1Id}
+          isLoser={winnerTeamId && winnerTeamId !== team1Id}
+        />
+        <div className="border-t border-surface-200/60" />
+        <TeamSlot
+          name={team2Name}
+          teamId={team2Id}
+          isWinner={winnerTeamId && winnerTeamId === team2Id}
+          isLoser={winnerTeamId && winnerTeamId !== team2Id}
+        />
+      </div>
+    );
+  }
 
+  const { player1Id, player1Name, player2Id, player2Name, winnerId } = slot;
   return (
     <div className="bg-surface-100/70 border border-surface-200 rounded-lg overflow-hidden">
       <PlayerSlot
@@ -72,6 +92,31 @@ function MatchupBox({ slot }) {
         isWinner={winnerId && winnerId === player2Id}
         isLoser={winnerId && winnerId !== player2Id}
       />
+    </div>
+  );
+}
+
+function TeamSlot({ name, teamId, isWinner, isLoser }) {
+  if (!teamId) {
+    return (
+      <div className="px-3 py-2 font-mono text-[11px] text-surface-300 italic">
+        BYE
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`px-3 py-2 font-body text-[13px] flex items-center gap-2 transition-colors
+        ${isWinner ? "bg-green-950/40 text-green-400 font-semibold" : ""}
+        ${isLoser ? "text-surface-400" : ""}
+        ${!isWinner && !isLoser ? "text-surface-700" : ""}`}
+    >
+      <span className="w-5 h-5 rounded-md bg-purple-950/40 border border-purple-800/40 flex items-center justify-center font-display font-bold text-[9px] text-purple-400 shrink-0">
+        {name?.[0]?.toUpperCase() || "?"}
+      </span>
+      <span className="truncate">{name || "TBD"}</span>
+      {isWinner && <span className="ml-auto text-[10px]">W</span>}
     </div>
   );
 }

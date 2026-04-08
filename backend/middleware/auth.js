@@ -41,7 +41,7 @@ async function requireAuth(req, res, next) {
 
     // Attach player to request
     const player = await db.query(
-      "SELECT id, username, display_name, email, singles_elo, doubles_elo, default_sport, role, created_at FROM players WHERE id = $1",
+      "SELECT id, username, display_name, email, singles_elo, doubles_elo, default_sport, default_club_id, role, created_at FROM players WHERE id = $1",
       [decoded.id]
     );
     if (player.rows.length === 0) {

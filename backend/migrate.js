@@ -217,7 +217,7 @@ DO $$ BEGIN
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'player_ratings' AND column_name = 'singles_utr'
   ) THEN
-    ALTER TABLE player_ratings ADD COLUMN singles_utr NUMERIC(4,2) NOT NULL DEFAULT 5.00;
+    ALTER TABLE player_ratings ADD COLUMN singles_utr NUMERIC(4,2) NOT NULL DEFAULT 1.00;
   END IF;
 END $$;
 
@@ -226,7 +226,7 @@ DO $$ BEGIN
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'player_ratings' AND column_name = 'doubles_utr'
   ) THEN
-    ALTER TABLE player_ratings ADD COLUMN doubles_utr NUMERIC(4,2) NOT NULL DEFAULT 5.00;
+    ALTER TABLE player_ratings ADD COLUMN doubles_utr NUMERIC(4,2) NOT NULL DEFAULT 1.00;
   END IF;
 END $$;
 
@@ -311,6 +311,28 @@ CREATE TABLE IF NOT EXISTS club_settings (
 INSERT INTO club_settings (key, value) VALUES ('group_shuffle_mode', 'both')
 ON CONFLICT (key) DO NOTHING;
 
+-- Default rating values (configurable by admin)
+INSERT INTO club_settings (key, value) VALUES ('default_elo', '1000')
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO club_settings (key, value) VALUES ('default_utr', '1.00')
+ON CONFLICT (key) DO NOTHING;
+
+-- Player sports: which sports each player is interested in
+CREATE TABLE IF NOT EXISTS player_sports (
+  id         SERIAL PRIMARY KEY,
+  player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  sport      VARCHAR(20) NOT NULL,
+  UNIQUE(player_id, sport)
+);
+
+CREATE INDEX IF NOT EXISTS idx_player_sports_player ON player_sports(player_id);
+
+-- Backfill existing players into player_sports based on their player_ratings
+INSERT INTO player_sports (player_id, sport)
+SELECT DISTINCT player_id, sport FROM player_ratings
+ON CONFLICT (player_id, sport) DO NOTHING;
+
 -- Backfill: make league creators directors
 INSERT INTO league_directors (league_id, player_id)
 SELECT id, created_by FROM leagues
@@ -320,6 +342,226 @@ ON CONFLICT (league_id, player_id) DO NOTHING;
 INSERT INTO tournament_directors (tournament_id, player_id)
 SELECT id, created_by FROM tournaments
 ON CONFLICT (tournament_id, player_id) DO NOTHING;
+
+-- ============================================================
+-- Team Tournament Support
+-- ============================================================
+
+-- Add tournament_type to tournaments (individual or team)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tournaments' AND column_name = 'tournament_type'
+  ) THEN
+    ALTER TABLE tournaments ADD COLUMN tournament_type VARCHAR(20) NOT NULL DEFAULT 'individual';
+  END IF;
+END $$;
+
+-- Add format to tournaments (knockout or round_robin)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tournaments' AND column_name = 'format'
+  ) THEN
+    ALTER TABLE tournaments ADD COLUMN format VARCHAR(20) NOT NULL DEFAULT 'knockout';
+  END IF;
+END $$;
+
+-- Tournament teams
+CREATE TABLE IF NOT EXISTS tournament_teams (
+  id            SERIAL PRIMARY KEY,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  name          VARCHAR(200) NOT NULL,
+  seed          INTEGER,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(tournament_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tournament_teams_tournament ON tournament_teams(tournament_id);
+
+-- Tournament team players (which players belong to which team)
+CREATE TABLE IF NOT EXISTS tournament_team_players (
+  id         SERIAL PRIMARY KEY,
+  team_id    INTEGER NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
+  player_id  INTEGER NOT NULL REFERENCES players(id),
+  UNIQUE(team_id, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tournament_team_players_team ON tournament_team_players(team_id);
+CREATE INDEX IF NOT EXISTS idx_tournament_team_players_player ON tournament_team_players(player_id);
+
+-- Add team references to tournament_brackets
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tournament_brackets' AND column_name = 'team1_id'
+  ) THEN
+    ALTER TABLE tournament_brackets ADD COLUMN team1_id INTEGER REFERENCES tournament_teams(id);
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tournament_brackets' AND column_name = 'team2_id'
+  ) THEN
+    ALTER TABLE tournament_brackets ADD COLUMN team2_id INTEGER REFERENCES tournament_teams(id);
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tournament_brackets' AND column_name = 'winner_team_id'
+  ) THEN
+    ALTER TABLE tournament_brackets ADD COLUMN winner_team_id INTEGER REFERENCES tournament_teams(id);
+  END IF;
+END $$;
+
+-- Round-robin standings table for team tournaments
+CREATE TABLE IF NOT EXISTS tournament_round_robin (
+  id            SERIAL PRIMARY KEY,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  team_id       INTEGER NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
+  played        INTEGER NOT NULL DEFAULT 0,
+  won           INTEGER NOT NULL DEFAULT 0,
+  lost          INTEGER NOT NULL DEFAULT 0,
+  drawn         INTEGER NOT NULL DEFAULT 0,
+  points        INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(tournament_id, team_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tournament_round_robin_tournament ON tournament_round_robin(tournament_id);
+
+-- Add team references to matches for team tournament match tracking
+-- Allow 'both' as match_type for tournaments
+DO $$ BEGIN
+  ALTER TABLE tournaments DROP CONSTRAINT IF EXISTS tournaments_match_type_check;
+  ALTER TABLE tournaments ADD CONSTRAINT tournaments_match_type_check
+    CHECK (match_type IN ('singles', 'doubles', 'both'));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- ============================================================
+-- League Registration Phase
+-- ============================================================
+
+-- Add registration_close_date to leagues
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'leagues' AND column_name = 'registration_close_date'
+  ) THEN
+    ALTER TABLE leagues ADD COLUMN registration_close_date DATE;
+  END IF;
+END $$;
+
+-- Update leagues status CHECK to include 'registration'
+DO $$ BEGIN
+  ALTER TABLE leagues DROP CONSTRAINT IF EXISTS leagues_status_check;
+  ALTER TABLE leagues ADD CONSTRAINT leagues_status_check
+    CHECK (status IN ('upcoming', 'registration', 'active', 'completed'));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'matches' AND column_name = 'team1_id'
+  ) THEN
+    ALTER TABLE matches ADD COLUMN team1_id INTEGER REFERENCES tournament_teams(id);
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'matches' AND column_name = 'team2_id'
+  ) THEN
+    ALTER TABLE matches ADD COLUMN team2_id INTEGER REFERENCES tournament_teams(id);
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'matches' AND column_name = 'winner_team_id'
+  ) THEN
+    ALTER TABLE matches ADD COLUMN winner_team_id INTEGER REFERENCES tournament_teams(id);
+  END IF;
+END $$;
+
+-- ============================================================
+-- Local Clubs
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS clubs (
+  id           SERIAL PRIMARY KEY,
+  name         VARCHAR(200) NOT NULL,
+  description  TEXT,
+  created_by   INTEGER NOT NULL REFERENCES players(id),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS club_admins (
+  id         SERIAL PRIMARY KEY,
+  club_id    INTEGER NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  player_id  INTEGER NOT NULL REFERENCES players(id),
+  UNIQUE(club_id, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_club_admins_club ON club_admins(club_id);
+CREATE INDEX IF NOT EXISTS idx_club_admins_player ON club_admins(player_id);
+
+-- Add club_id to leagues
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'leagues' AND column_name = 'club_id'
+  ) THEN
+    ALTER TABLE leagues ADD COLUMN club_id INTEGER REFERENCES clubs(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- Add club_id to tournaments
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tournaments' AND column_name = 'club_id'
+  ) THEN
+    ALTER TABLE tournaments ADD COLUMN club_id INTEGER REFERENCES clubs(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_leagues_club ON leagues(club_id);
+CREATE INDEX IF NOT EXISTS idx_tournaments_club ON tournaments(club_id);
+
+-- Club members (users can join multiple clubs)
+CREATE TABLE IF NOT EXISTS club_members (
+  id         SERIAL PRIMARY KEY,
+  club_id    INTEGER NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  joined_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(club_id, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_club_members_club ON club_members(club_id);
+CREATE INDEX IF NOT EXISTS idx_club_members_player ON club_members(player_id);
+
+-- Add default_club_id to players
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'players' AND column_name = 'default_club_id'
+  ) THEN
+    ALTER TABLE players ADD COLUMN default_club_id INTEGER REFERENCES clubs(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- Auto-add club admins as club members
+INSERT INTO club_members (club_id, player_id)
+SELECT club_id, player_id FROM club_admins
+ON CONFLICT (club_id, player_id) DO NOTHING;
 `;
 
 async function migrate() {
