@@ -98,34 +98,17 @@ pingpong-club/
 └── README.md
 ```
 
-## API Endpoints
+## API Contract
 
-### Auth
-| Method | Endpoint         | Description          |
-|--------|-----------------|----------------------|
-| POST   | /api/auth/register | Create new account  |
-| POST   | /api/auth/login    | Sign in             |
-| POST   | /api/auth/logout   | Sign out            |
-| GET    | /api/auth/me       | Get current user    |
+The shared backend/frontend API contract now lives at [backend/openapi.yaml](/Users/ramakrishna0908/MyProjects/LocalSportsClub/backend/openapi.yaml).
 
-### Players
-| Method | Endpoint              | Description          |
-|--------|-----------------------|----------------------|
-| GET    | /api/players          | List all players     |
-| GET    | /api/players/:id      | Get player profile   |
+Use that file as the canonical reference for:
 
-### Matches
-| Method | Endpoint              | Description              |
-|--------|-----------------------|--------------------------|
-| POST   | /api/matches          | Record a match result    |
-| GET    | /api/matches          | Get match history        |
-| GET    | /api/matches/my       | Get current user matches |
-
-### Rankings
-| Method | Endpoint                  | Description              |
-|--------|---------------------------|--------------------------|
-| GET    | /api/rankings/singles     | Singles leaderboard      |
-| GET    | /api/rankings/doubles     | Doubles leaderboard      |
+- endpoints
+- request and response shapes
+- auth requirements
+- enum values
+- shared integration assumptions
 
 ## Database Schema
 
