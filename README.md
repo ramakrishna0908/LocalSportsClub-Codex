@@ -100,7 +100,7 @@ pingpong-club/
 
 ## API Contract
 
-The shared backend/frontend API contract now lives at [backend/openapi.yaml](/Users/ramakrishna0908/MyProjects/LocalSportsClub-Codex/backend/openapi.yaml).
+The shared backend/frontend API contract now lives at [backend/openapi.yaml](https://github.com/ramakrishna0908/LocalSportsClub-Codex/blob/main/backend/openapi.yaml).
 
 Use that file as the canonical reference for:
 
