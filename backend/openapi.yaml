@@ -1,0 +1,2073 @@
+openapi: 3.1.0
+info:
+  title: Local Sports Club API
+  version: 1.0.0
+  summary: Shared API contract for the Local Sports Club backend
+  description: |
+    OpenAPI contract derived from the current Express backend implementation in `backend/routes`.
+
+    This file is intended to be the shared source of truth for frontend/backend API integration.
+    It documents the routes currently exposed by the backend, the auth model, core request bodies,
+    commonly returned response shapes, and the enum values enforced by the server.
+servers:
+  - url: http://localhost:3001/api
+    description: Local backend
+tags:
+  - name: Health
+  - name: Auth
+  - name: Players
+  - name: Matches
+  - name: Rankings
+  - name: Leagues
+  - name: Tournaments
+  - name: Clubs
+  - name: Analytics
+  - name: Settings
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                required: [status, timestamp]
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new player
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Player registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '500':
+          $ref: '#/components/responses/Error500'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '500':
+          $ref: '#/components/responses/Error500'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out current session
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '500':
+          $ref: '#/components/responses/Error500'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current authenticated player
+      responses:
+        '200':
+          description: Current player
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  player:
+                    $ref: '#/components/schemas/AuthenticatedPlayer'
+                required: [player]
+        '401':
+          $ref: '#/components/responses/Error401'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change current player password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 6
+              required: [currentPassword, newPassword]
+      responses:
+        '200':
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '500':
+          $ref: '#/components/responses/Error500'
+
+  /auth/role:
+    patch:
+      tags: [Auth]
+      summary: Update a player's role
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playerId:
+                  type: integer
+                role:
+                  $ref: '#/components/schemas/Role'
+              required: [playerId, role]
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  player:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      username:
+                        type: string
+                      display_name:
+                        type: string
+                      role:
+                        $ref: '#/components/schemas/Role'
+                    required: [id, username, display_name, role]
+                required: [player]
+        '400':
+          $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+
+  /players:
+    get:
+      tags: [Players]
+      summary: List players
+      parameters:
+        - $ref: '#/components/parameters/SportQuery'
+      responses:
+        '200':
+          description: Players visible for a sport
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  players:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlayerListItem'
+                  ratingSystem:
+                    $ref: '#/components/schemas/RatingSystem'
+                required: [players, ratingSystem]
+        '401':
+          $ref: '#/components/responses/Error401'
+    post:
+      deprecated: true
+      tags: [Players]
+      summary: Not implemented
+      responses:
+        '405':
+          description: Method not allowed
+
+  /players/quick-add:
+    post:
+      tags: [Players]
+      summary: Quick-add a player
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                username:
+                  type: string
+                sports:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Sport'
+                initialRatings:
+                  type: object
+                  additionalProperties:
+                    oneOf:
+                      - type: number
+                      - type: string
+              required: [displayName, sports]
+      responses:
+        '201':
+          description: Player added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  player:
+                    type: object
+                  message:
+                    type: string
+                required: [player, message]
+        '400':
+          $ref: '#/components/responses/Error400'
+        '409':
+          $ref: '#/components/responses/Error409'
+
+  /players/me/default-sport:
+    patch:
+      tags: [Players]
+      summary: Update current player's default sport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sport:
+                  $ref: '#/components/schemas/Sport'
+              required: [sport]
+      responses:
+        '200':
+          description: Default sport updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  defaultSport:
+                    $ref: '#/components/schemas/Sport'
+                required: [message, defaultSport]
+        '400':
+          $ref: '#/components/responses/Error400'
+
+  /players/{id}:
+    get:
+      tags: [Players]
+      summary: Get player profile
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/SportQuery'
+      responses:
+        '200':
+          description: Player profile with ratings and stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  player:
+                    $ref: '#/components/schemas/PlayerProfile'
+                  ratings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlayerRating'
+                  sports:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Sport'
+                  stats:
+                    type: object
+                    properties:
+                      singles_played:
+                        type: integer
+                      singles_wins:
+                        type: integer
+                      doubles_played:
+                        type: integer
+                      doubles_wins:
+                        type: integer
+                required: [player, ratings, sports, stats]
+        '401':
+          $ref: '#/components/responses/Error401'
+        '404':
+          $ref: '#/components/responses/Error404'
+
+  /matches:
+    get:
+      tags: [Matches]
+      summary: List matches
+      parameters:
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/MatchType'
+        - $ref: '#/components/parameters/SportQuery'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Match list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Match'
+                required: [matches]
+    post:
+      tags: [Matches]
+      summary: Record a match
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMatchRequest'
+      responses:
+        '201':
+          description: Match recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  match:
+                    $ref: '#/components/schemas/Match'
+                required: [match]
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+
+  /matches/my:
+    get:
+      tags: [Matches]
+      summary: List current player's matches
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 7
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - $ref: '#/components/parameters/SportQuery'
+      responses:
+        '200':
+          description: Current player's matches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Match'
+                required: [matches]
+
+  /matches/{id}:
+    patch:
+      tags: [Matches]
+      summary: Update a match
+      description: Admin or director only.
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                score:
+                  type: [string, 'null']
+                swapResult:
+                  type: boolean
+      responses:
+        '200':
+          description: Match updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  match:
+                    $ref: '#/components/schemas/Match'
+                additionalProperties: true
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    delete:
+      tags: [Matches]
+      summary: Delete a match
+      description: Admin or director only.
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Match deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+
+  /rankings/singles:
+    get:
+      tags: [Rankings]
+      summary: Singles rankings
+      parameters:
+        - $ref: '#/components/parameters/SportQueryRequired'
+        - $ref: '#/components/parameters/RatingTypeQuery'
+      responses:
+        '200':
+          description: Singles leaderboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RankingResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+
+  /rankings/doubles:
+    get:
+      tags: [Rankings]
+      summary: Doubles rankings
+      parameters:
+        - $ref: '#/components/parameters/SportQueryRequired'
+        - $ref: '#/components/parameters/RatingTypeQuery'
+      responses:
+        '200':
+          description: Doubles leaderboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RankingResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+
+  /leagues:
+    get:
+      tags: [Leagues]
+      summary: List leagues
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/LeagueStatus'
+        - name: matchType
+          in: query
+          schema:
+            $ref: '#/components/schemas/MatchType'
+        - $ref: '#/components/parameters/SportQuery'
+        - name: clubId
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: League list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leagues:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LeagueSummary'
+                required: [leagues]
+    post:
+      tags: [Leagues]
+      summary: Create a league
+      description: Admin or director only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLeagueRequest'
+      responses:
+        '201':
+          description: League created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  league:
+                    type: object
+                required: [league]
+
+  /leagues/{id}:
+    get:
+      tags: [Leagues]
+      summary: Get league detail
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: League detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  league:
+                    $ref: '#/components/schemas/LeagueDetail'
+                required: [league]
+        '404':
+          $ref: '#/components/responses/Error404'
+    patch:
+      tags: [Leagues]
+      summary: Update league settings
+      description: Dates may be updated by admin or league director. `registrationCloseDate` is admin-only.
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                registrationCloseDate:
+                  type: [string, 'null']
+                  format: date
+                startDate:
+                  type: string
+                  format: date
+                endDate:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: League updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+
+  /leagues/{id}/join:
+    post:
+      tags: [Leagues]
+      summary: Join a league
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /leagues/{id}/leave:
+    post:
+      tags: [Leagues]
+      summary: Leave a league
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Left
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /leagues/{id}/status:
+    patch:
+      tags: [Leagues]
+      summary: Update league status
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/LeagueStatus'
+              required: [status]
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /leagues/{id}/directors:
+    post:
+      tags: [Leagues]
+      summary: Add league director
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignPlayerRequest'
+      responses:
+        '200':
+          description: Director added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /leagues/{id}/directors/{playerId}:
+    delete:
+      tags: [Leagues]
+      summary: Remove league director
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/PlayerIdParam'
+      responses:
+        '200':
+          description: Director removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /leagues/{id}/shuffle-groups:
+    post:
+      tags: [Leagues]
+      summary: Create or reshuffle league groups
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                groupSize:
+                  type: integer
+                  minimum: 2
+                mode:
+                  type: string
+                  enum: [sequential, snake]
+              required: [groupSize]
+      responses:
+        '200':
+          description: Groups created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  groups:
+                    type: array
+                    items:
+                      type: object
+                required: [message, groups]
+
+  /tournaments:
+    get:
+      tags: [Tournaments]
+      summary: List tournaments
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TournamentStatus'
+        - name: matchType
+          in: query
+          schema:
+            $ref: '#/components/schemas/MatchType'
+        - $ref: '#/components/parameters/SportQuery'
+        - name: tournamentType
+          in: query
+          schema:
+            $ref: '#/components/schemas/TournamentType'
+        - name: clubId
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Tournament list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tournaments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TournamentSummary'
+                required: [tournaments]
+    post:
+      tags: [Tournaments]
+      summary: Create a tournament
+      description: Admin or director only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTournamentRequest'
+      responses:
+        '201':
+          description: Tournament created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tournament:
+                    type: object
+                required: [tournament]
+
+  /tournaments/{id}:
+    get:
+      tags: [Tournaments]
+      summary: Get tournament detail
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Tournament detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tournament:
+                    $ref: '#/components/schemas/TournamentDetail'
+                required: [tournament]
+    patch:
+      tags: [Tournaments]
+      summary: Update tournament settings
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tournamentDate:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: Tournament updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /tournaments/{id}/register:
+    post:
+      tags: [Tournaments]
+      summary: Register current player for a tournament
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /tournaments/{id}/unregister:
+    post:
+      tags: [Tournaments]
+      summary: Unregister current player from a tournament
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Unregistered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /tournaments/{id}/teams:
+    post:
+      tags: [Tournaments]
+      summary: Create a team in a team tournament
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamUpsertRequest'
+      responses:
+        '201':
+          description: Team created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    type: object
+                required: [team]
+
+  /tournaments/{id}/teams/{teamId}:
+    put:
+      tags: [Tournaments]
+      summary: Update a tournament team
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/TeamIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamUpsertRequest'
+      responses:
+        '200':
+          description: Team updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+    delete:
+      tags: [Tournaments]
+      summary: Delete a tournament team
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/TeamIdParam'
+      responses:
+        '200':
+          description: Team deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /tournaments/{id}/generate-bracket:
+    post:
+      tags: [Tournaments]
+      summary: Generate tournament bracket
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Bracket generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /tournaments/{id}/record-match:
+    post:
+      tags: [Tournaments]
+      summary: Record a tournament bracket match
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/RecordTournamentIndividualMatchRequest'
+                - $ref: '#/components/schemas/RecordTournamentTeamMatchRequest'
+      responses:
+        '200':
+          description: Match recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  matchId:
+                    type: integer
+                required: [message, matchId]
+
+  /tournaments/{id}/status:
+    patch:
+      tags: [Tournaments]
+      summary: Update tournament status
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/TournamentStatus'
+              required: [status]
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /tournaments/{id}/directors:
+    post:
+      tags: [Tournaments]
+      summary: Add tournament director
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignPlayerRequest'
+      responses:
+        '200':
+          description: Director added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /clubs:
+    get:
+      tags: [Clubs]
+      summary: List clubs
+      responses:
+        '200':
+          description: Club list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clubs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ClubSummary'
+                required: [clubs]
+    post:
+      tags: [Clubs]
+      summary: Create a club
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+              required: [name]
+      responses:
+        '201':
+          description: Club created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  club:
+                    type: object
+                required: [club]
+
+  /clubs/my/list:
+    get:
+      tags: [Clubs]
+      summary: List clubs for current player
+      responses:
+        '200':
+          description: Current player's clubs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clubs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        name:
+                          type: string
+                required: [clubs]
+
+  /clubs/default:
+    patch:
+      tags: [Clubs]
+      summary: Set current player's default club
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clubId:
+                  type: [integer, 'null']
+      responses:
+        '200':
+          description: Default club updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /clubs/{id}:
+    get:
+      tags: [Clubs]
+      summary: Get club detail
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Club detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  club:
+                    $ref: '#/components/schemas/ClubDetail'
+                required: [club]
+    patch:
+      tags: [Clubs]
+      summary: Update a club
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: [string, 'null']
+      responses:
+        '200':
+          description: Club updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+    delete:
+      tags: [Clubs]
+      summary: Delete a club
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Club deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /clubs/{id}/admins:
+    post:
+      tags: [Clubs]
+      summary: Add a club admin
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignPlayerRequest'
+      responses:
+        '200':
+          description: Admin added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /clubs/{id}/admins/{playerId}:
+    delete:
+      tags: [Clubs]
+      summary: Remove a club admin
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/PlayerIdParam'
+      responses:
+        '200':
+          description: Admin removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /clubs/{id}/join:
+    post:
+      tags: [Clubs]
+      summary: Join a club
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /clubs/{id}/leave:
+    post:
+      tags: [Clubs]
+      summary: Leave a club
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Left
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /analytics/movers:
+    get:
+      tags: [Analytics]
+      summary: Get top movers in a period
+      parameters:
+        - $ref: '#/components/parameters/SportQueryRequired'
+        - name: matchType
+          in: query
+          schema:
+            $ref: '#/components/schemas/MatchType'
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+      responses:
+        '200':
+          description: Movers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  movers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Mover'
+                  ratingSystem:
+                    $ref: '#/components/schemas/RatingSystem'
+                required: [movers, ratingSystem]
+
+  /analytics/suggestions:
+    get:
+      tags: [Analytics]
+      summary: Get matchup suggestions
+      parameters:
+        - $ref: '#/components/parameters/SportQueryRequired'
+        - name: matchType
+          in: query
+          schema:
+            $ref: '#/components/schemas/MatchType'
+      responses:
+        '200':
+          description: Suggestions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  myRating:
+                    type: number
+                  suggestions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchSuggestion'
+                  doublesSuggestions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DoublesSuggestion'
+                  ratingSystem:
+                    $ref: '#/components/schemas/RatingSystem'
+                required: [myRating, suggestions, doublesSuggestions, ratingSystem]
+
+  /analytics/trends:
+    get:
+      tags: [Analytics]
+      summary: Get player rating and matchup trends
+      parameters:
+        - $ref: '#/components/parameters/SportQueryRequired'
+        - name: matchType
+          in: query
+          schema:
+            $ref: '#/components/schemas/MatchType'
+      responses:
+        '200':
+          description: Trends
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ratingProgression:
+                    type: array
+                    items:
+                      type: object
+                  headToHead:
+                    type: array
+                    items:
+                      type: object
+                  streaks:
+                    type: object
+                  rollingWinRate:
+                    type: array
+                    items:
+                      type: object
+                  ratingSystem:
+                    $ref: '#/components/schemas/RatingSystem'
+                required: [ratingProgression, headToHead, streaks, rollingWinRate, ratingSystem]
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Get application settings
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings:
+                    type: object
+                    additionalProperties:
+                      type: string
+                required: [settings]
+    patch:
+      tags: [Settings]
+      summary: Update an application setting
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key:
+                  type: string
+                value:
+                  type: string
+              required: [key, value]
+      responses:
+        '200':
+          description: Setting updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  key:
+                    type: string
+                  value:
+                    type: string
+                required: [message, key, value]
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    PlayerIdParam:
+      name: playerId
+      in: path
+      required: true
+      schema:
+        type: integer
+    TeamIdParam:
+      name: teamId
+      in: path
+      required: true
+      schema:
+        type: integer
+    SportQuery:
+      name: sport
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/Sport'
+    SportQueryRequired:
+      name: sport
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/Sport'
+    RatingTypeQuery:
+      name: ratingType
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/RatingType'
+  responses:
+    Error400:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error401:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error403:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error404:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error409:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error500:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Sport:
+      type: string
+      enum: [ping_pong, pickleball, tennis]
+    RatingType:
+      type: string
+      enum: [league, tournament, skill]
+    RatingSystem:
+      type: string
+      enum: [elo, utr]
+    Role:
+      type: string
+      enum: [admin, director, user]
+    MatchType:
+      type: string
+      enum: [singles, doubles]
+    TournamentMatchType:
+      type: string
+      enum: [singles, doubles, both]
+    LeagueStatus:
+      type: string
+      enum: [upcoming, registration, active, completed]
+    TournamentStatus:
+      type: string
+      enum: [upcoming, registration, in_progress, completed]
+    TournamentType:
+      type: string
+      enum: [individual, team]
+    TournamentFormat:
+      type: string
+      enum: [knockout, round_robin]
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+    RegisterRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 3
+        displayName:
+          type: string
+        password:
+          type: string
+          minLength: 6
+        email:
+          type: string
+          format: email
+        defaultSport:
+          $ref: '#/components/schemas/Sport'
+        sports:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sport'
+          minItems: 1
+      required: [username, displayName, password, sports]
+    AuthPlayer:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: [string, 'null']
+          format: email
+        default_sport:
+          $ref: '#/components/schemas/Sport'
+        default_club_id:
+          type: [integer, 'null']
+        role:
+          $ref: '#/components/schemas/Role'
+        created_at:
+          type: string
+          format: date-time
+      required: [id, username, display_name]
+    AuthenticatedPlayer:
+      allOf:
+        - $ref: '#/components/schemas/AuthPlayer'
+        - type: object
+          properties:
+            sports:
+              type: array
+              items:
+                $ref: '#/components/schemas/Sport'
+          required: [sports]
+    AuthResponse:
+      type: object
+      properties:
+        player:
+          $ref: '#/components/schemas/AuthPlayer'
+        token:
+          type: string
+      required: [player, token]
+    PlayerListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        display_name:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        default_sport:
+          $ref: '#/components/schemas/Sport'
+        created_at:
+          type: string
+          format: date-time
+        singles_elo:
+          type: integer
+        doubles_elo:
+          type: integer
+        singles_utr:
+          type: number
+        doubles_utr:
+          type: number
+      required: [id, username, display_name, role]
+    PlayerProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: [string, 'null']
+        default_sport:
+          $ref: '#/components/schemas/Sport'
+        created_at:
+          type: string
+          format: date-time
+        last_login:
+          type: [string, 'null']
+          format: date-time
+      required: [id, username, display_name]
+    PlayerRating:
+      type: object
+      properties:
+        sport:
+          $ref: '#/components/schemas/Sport'
+        rating_type:
+          $ref: '#/components/schemas/RatingType'
+        singles_elo:
+          type: integer
+        doubles_elo:
+          type: integer
+        singles_utr:
+          type: number
+        doubles_utr:
+          type: number
+      required: [sport, rating_type]
+    MatchParticipant:
+      type: object
+      properties:
+        player_id:
+          type: integer
+        display_name:
+          type: string
+        team:
+          type: string
+          enum: [winner, loser]
+        elo_before:
+          type: [integer, 'null']
+        elo_after:
+          type: [integer, 'null']
+      required: [player_id, team]
+    Match:
+      type: object
+      properties:
+        id:
+          type: integer
+        match_type:
+          $ref: '#/components/schemas/MatchType'
+        score:
+          type: [string, 'null']
+        recorded_by:
+          type: integer
+        league_id:
+          type: [integer, 'null']
+        tournament_id:
+          type: [integer, 'null']
+        sport:
+          $ref: '#/components/schemas/Sport'
+        team1_id:
+          type: [integer, 'null']
+        team2_id:
+          type: [integer, 'null']
+        winner_team_id:
+          type: [integer, 'null']
+        played_at:
+          type: string
+          format: date-time
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchParticipant'
+      required: [id, match_type, sport]
+    CreateMatchRequest:
+      type: object
+      properties:
+        matchType:
+          $ref: '#/components/schemas/MatchType'
+        winners:
+          type: array
+          items:
+            type: integer
+        losers:
+          type: array
+          items:
+            type: integer
+        score:
+          type: string
+        leagueId:
+          type: integer
+        tournamentId:
+          type: integer
+        teamId:
+          type: integer
+        opponentTeamId:
+          type: integer
+        sport:
+          $ref: '#/components/schemas/Sport'
+      required: [matchType, winners, losers, sport]
+    RankingEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+        id:
+          type: integer
+        username:
+          type: string
+        displayName:
+          type: string
+        rating:
+          type: number
+        played:
+          type: integer
+        wins:
+          type: integer
+        winRate:
+          type: integer
+      required: [rank, id, username, displayName, rating, played, wins, winRate]
+    RankingResponse:
+      type: object
+      properties:
+        rankings:
+          type: array
+          items:
+            $ref: '#/components/schemas/RankingEntry'
+        ratingSystem:
+          $ref: '#/components/schemas/RatingSystem'
+        defaultRating:
+          type: number
+      required: [rankings, ratingSystem, defaultRating]
+    LeagueSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        matchType:
+          $ref: '#/components/schemas/MatchType'
+        sport:
+          $ref: '#/components/schemas/Sport'
+        status:
+          $ref: '#/components/schemas/LeagueStatus'
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        createdBy:
+          type: integer
+        createdByName:
+          type: string
+        clubId:
+          type: [integer, 'null']
+        clubName:
+          type: [string, 'null']
+        playerCount:
+          type: integer
+        registrationCloseDate:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, matchType, sport, status, playerCount]
+    LeagueDetail:
+      allOf:
+        - $ref: '#/components/schemas/LeagueSummary'
+        - type: object
+          properties:
+            ratingSystem:
+              $ref: '#/components/schemas/RatingSystem'
+            players:
+              type: array
+              items:
+                type: object
+            directors:
+              type: array
+              items:
+                type: object
+            groups:
+              type: array
+              items:
+                type: object
+            standings:
+              type: array
+              items:
+                type: object
+            isMember:
+              type: boolean
+            isDirector:
+              type: boolean
+            canManage:
+              type: boolean
+          required: [players, directors, groups, standings, isMember, isDirector, canManage]
+    CreateLeagueRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        matchType:
+          $ref: '#/components/schemas/MatchType'
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        sport:
+          $ref: '#/components/schemas/Sport'
+        registrationCloseDate:
+          type: string
+          format: date
+        clubId:
+          type: integer
+      required: [name, matchType, startDate, endDate, sport]
+    TournamentSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        matchType:
+          $ref: '#/components/schemas/TournamentMatchType'
+        sport:
+          $ref: '#/components/schemas/Sport'
+        status:
+          $ref: '#/components/schemas/TournamentStatus'
+        tournamentType:
+          $ref: '#/components/schemas/TournamentType'
+        format:
+          $ref: '#/components/schemas/TournamentFormat'
+        tournamentDate:
+          type: string
+          format: date-time
+        maxPlayers:
+          type: [integer, 'null']
+        createdBy:
+          type: integer
+        createdByName:
+          type: string
+        clubId:
+          type: [integer, 'null']
+        clubName:
+          type: [string, 'null']
+        playerCount:
+          type: integer
+        teamCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, matchType, sport, status, tournamentType, format, tournamentDate, playerCount, teamCount]
+    TournamentDetail:
+      allOf:
+        - $ref: '#/components/schemas/TournamentSummary'
+        - type: object
+          properties:
+            isRegistered:
+              type: boolean
+            isCreator:
+              type: boolean
+            isDirector:
+              type: boolean
+            canManage:
+              type: boolean
+            players:
+              type: array
+              items:
+                type: object
+            directors:
+              type: array
+              items:
+                type: object
+            teams:
+              type: array
+              items:
+                type: object
+            standings:
+              type: array
+              items:
+                type: object
+            bracket:
+              type: array
+              items:
+                type: object
+          required: [isRegistered, isCreator, isDirector, canManage, players, directors, teams, standings, bracket]
+    CreateTournamentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        matchType:
+          $ref: '#/components/schemas/TournamentMatchType'
+        tournamentDate:
+          type: string
+          format: date
+        maxPlayers:
+          type: integer
+        sport:
+          $ref: '#/components/schemas/Sport'
+        tournamentType:
+          $ref: '#/components/schemas/TournamentType'
+        format:
+          $ref: '#/components/schemas/TournamentFormat'
+        clubId:
+          type: integer
+      required: [name, matchType, tournamentDate, sport]
+    TeamUpsertRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        playerIds:
+          type: array
+          items:
+            type: integer
+      required: [name]
+    RecordTournamentIndividualMatchRequest:
+      type: object
+      properties:
+        round:
+          type: integer
+        position:
+          type: integer
+        winnerId:
+          type: integer
+        score:
+          type: string
+      required: [round, position, winnerId]
+    RecordTournamentTeamMatchRequest:
+      type: object
+      properties:
+        round:
+          type: integer
+        position:
+          type: integer
+        winnerTeamId:
+          type: integer
+        score:
+          type: string
+      required: [round, position, winnerTeamId]
+    AssignPlayerRequest:
+      type: object
+      properties:
+        playerId:
+          type: integer
+      required: [playerId]
+    ClubSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        createdBy:
+          type: integer
+        createdByName:
+          type: string
+        adminCount:
+          type: integer
+        memberCount:
+          type: integer
+        leagueCount:
+          type: integer
+        tournamentCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, createdByName, adminCount, memberCount, leagueCount, tournamentCount]
+    ClubDetail:
+      allOf:
+        - $ref: '#/components/schemas/ClubSummary'
+        - type: object
+          properties:
+            isClubAdmin:
+              type: boolean
+            isMember:
+              type: boolean
+            memberCount:
+              type: integer
+            canManage:
+              type: boolean
+            admins:
+              type: array
+              items:
+                type: object
+            leagues:
+              type: array
+              items:
+                type: object
+            tournaments:
+              type: array
+              items:
+                type: object
+          required: [isClubAdmin, isMember, canManage, admins, leagues, tournaments]
+    Mover:
+      type: object
+      properties:
+        id:
+          type: integer
+        displayName:
+          type: string
+        startRating:
+          type: integer
+        endRating:
+          type: integer
+        delta:
+          type: integer
+        matchesPlayed:
+          type: integer
+      required: [id, displayName, startRating, endRating, delta, matchesPlayed]
+    MatchSuggestion:
+      type: object
+      properties:
+        opponent:
+          type: object
+          properties:
+            id:
+              type: integer
+            displayName:
+              type: string
+            rating:
+              type: number
+          required: [id, displayName, rating]
+        winProbability:
+          type: number
+        lastPlayedAt:
+          type: [string, 'null']
+          format: date-time
+        daysSinceLastMatch:
+          type: [integer, 'null']
+      required: [opponent, winProbability, daysSinceLastMatch]
+    DoublesSuggestion:
+      type: object
+      properties:
+        team1:
+          type: array
+          items:
+            type: object
+        team2:
+          type: array
+          items:
+            type: object
+        team1Total:
+          type: number
+        team2Total:
+          type: number
+        ratingGap:
+          type: number
+      required: [team1, team2, team1Total, team2Total, ratingGap]
